@@ -69,7 +69,7 @@ export class ProjectsController {
   @ApiOperation({
     summary: 'Thêm user vào project - chỉ owner được thao tác',
   })
-  @Post(':id/members')
+  @Post('add-member/:id')
   addMember(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() addProjectMemberDto: AddProjectMemberDto,

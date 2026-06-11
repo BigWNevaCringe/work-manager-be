@@ -90,7 +90,7 @@ export class AuthController {
   })
   @HttpCode(200)
   @UseGuards(AuthGuard)
-  @Get('me')
+  @Get('user')
   async getMe(@CurrentUser('sub') userId: string) {
     return this.authService.me(userId);
   }

@@ -56,6 +56,8 @@ export class ProjectsService {
   ) {}
 
   async create(createProjectDto: CreateProjectDto, userId: string) {
+    await this.checkExistingName(createProjectDto.project_name, userId);
+
     const project = this.projectRepository.create({
       ...createProjectDto,
       owner_id: userId,
@@ -150,6 +152,10 @@ export class ProjectsService {
 
   async update(id: string, updateProjectDto: UpdateProjectDto, userId: string) {
     const project = await this.findOwnedActiveProject(id, userId);
+
+    if (updateProjectDto.project_name) {
+      await this.checkExistingName(updateProjectDto.project_name, userId, id);
+    }
 
     Object.assign(project, updateProjectDto);
 
@@ -305,5 +311,30 @@ export class ProjectsService {
     sortByPosition(rootTasks);
 
     return rootTasks;
+  }
+
+  private async checkExistingName(
+    project_name: string,
+    userId: string,
+    excludeProjectId?: string,
+  ) {
+    const query = this.projectRepository
+      .createQueryBuilder('project')
+      .innerJoin('project.members', 'member')
+      .where('member.user_id = :userId', { userId })
+      .andWhere('project.project_name = :project_name', { project_name })
+      .andWhere('project.status = :status', { status: StatusEnum.ACTIVE });
+
+    if (excludeProjectId) {
+      query.andWhere('project.project_id != :excludeProjectId', {
+        excludeProjectId,
+      });
+    }
+
+    const existing = await query.getOne();
+
+    if (existing) {
+      throw new ConflictException('Tên dự án đã tồn tại');
+    }
   }
 }

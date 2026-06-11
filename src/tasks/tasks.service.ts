@@ -285,4 +285,29 @@ export class TasksService {
     await this.taskAssigneeRepository.delete({ task_id: taskId });
     await this.taskRepository.delete({ task_id: taskId });
   }
+
+  private async checkExistingName(
+    title: string,
+    userId: string,
+    excludeProjectId?: string,
+  ) {
+    const query = this.projectRepository
+      .createQueryBuilder('project')
+      .innerJoin('project.members', 'member')
+      .where('member.user_id = :userId', { userId })
+      .andWhere('project.project_name = :project_name', { title })
+      .andWhere('project.status = :status', { status: StatusEnum.ACTIVE });
+
+    if (excludeProjectId) {
+      query.andWhere('project.project_id != :excludeProjectId', {
+        excludeProjectId,
+      });
+    }
+
+    const existing = await query.getOne();
+
+    if (existing) {
+      throw new ConflictException('Tên dự án đã tồn tại');
+    }
+  }
 }

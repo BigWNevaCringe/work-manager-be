@@ -38,7 +38,7 @@ export class TasksController {
   @ApiOperation({
     summary: 'Phân công user vào task - chỉ owner project được thao tác',
   })
-  @Post(':id/assignees')
+  @Post('assign-user/:id')
   assignUser(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() assignTaskUserDto: AssignTaskUserDto,
@@ -49,8 +49,9 @@ export class TasksController {
 
   @ApiOperation({
     summary: 'Gỡ user khỏi task - chỉ owner project được thao tác',
+    description: '/remove-user-from-task/{task_id}/{user_id}'
   })
-  @Delete(':id/assignees/:userId')
+  @Delete('/remove-user-from-task/:id/:userId')
   unassignUser(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('userId', ParseUUIDPipe) assigneeUserId: string,

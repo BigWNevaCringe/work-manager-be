@@ -13,6 +13,7 @@ import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { AddProjectMemberDto } from './dto/add-project-member.dto';
+import { RemoveProjectMembersDto } from './dto/remove-project-members.dto';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ApiOperation } from '@nestjs/swagger';
@@ -67,15 +68,33 @@ export class ProjectsController {
   }
 
   @ApiOperation({
-    summary: 'Thêm user vào project - chỉ owner được thao tác',
+    summary: 'Thêm nhiều user vào project - chỉ owner được thao tác',
+    description: 'Truyền project_id trên url và body payload với user_id'
   })
-  @Post('add-member/:id')
-  addMember(
+  @Post(':id/members')
+  addMembers(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() addProjectMemberDto: AddProjectMemberDto,
     @CurrentUser('sub') userId: string,
   ) {
-    return this.projectsService.addMember(id, addProjectMemberDto, userId);
+    return this.projectsService.addMembers(id, addProjectMemberDto, userId);
+  }
+
+  @ApiOperation({
+    summary: 'Xóa nhiều user khỏi project - chỉ owner được thao tác',
+    description: 'Truyền project_id trên url và body payload với user_id'
+  })
+  @Delete(':id/members')
+  removeMembers(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() removeProjectMembersDto: RemoveProjectMembersDto,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.projectsService.removeMembers(
+      id,
+      removeProjectMembersDto,
+      userId,
+    );
   }
 
   @ApiOperation({ summary: 'Cập nhật thông tin dự án' })

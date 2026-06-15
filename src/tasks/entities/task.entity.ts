@@ -22,7 +22,9 @@ export enum TaskPriorityEnum {
 export enum TaskStatus {
   TODO = 'todo',
   PROGRESS = 'progress',
+  SUBMITTED = 'submitted',
   REVIEW = 'review',
+  REJECT = 'reject',
   DONE = 'done',
 }
 

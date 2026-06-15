@@ -7,8 +7,9 @@ import {
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { AddProjectMemberDto } from './dto/add-project-member.dto';
+import { RemoveProjectMembersDto } from './dto/remove-project-members.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Project, StatusEnum } from './entities/project.entity';
 import {
   MemberRoleEnum,
@@ -162,48 +163,6 @@ export class ProjectsService {
     return this.projectRepository.save(project);
   }
 
-  async addMember(
-    projectId: string,
-    addProjectMemberDto: AddProjectMemberDto,
-    userId: string,
-  ) {
-    await this.findOwnedActiveProject(projectId, userId);
-
-    const user = await this.userRepository.findOne({
-      where: { user_id: addProjectMemberDto.user_id },
-    });
-
-    if (!user) {
-      throw new NotFoundException('Không tìm thấy user');
-    }
-
-    const existingMember = await this.projectMemberRepository.findOne({
-      where: {
-        project_id: projectId,
-        user_id: addProjectMemberDto.user_id,
-      },
-    });
-
-    if (existingMember) {
-      throw new ConflictException('User đã là thành viên của dự án');
-    }
-
-    const member = this.projectMemberRepository.create({
-      project_id: projectId,
-      user_id: addProjectMemberDto.user_id,
-      role: MemberRoleEnum.MEMBER,
-    });
-
-    await this.projectMemberRepository.save(member);
-
-    return {
-      message: 'Đã thêm user vào dự án',
-      project_id: projectId,
-      user_id: addProjectMemberDto.user_id,
-      role: MemberRoleEnum.MEMBER,
-    };
-  }
-
   async remove(id: string, userId: string) {
     const project = await this.findOwnedActiveProject(id, userId);
 
@@ -220,6 +179,104 @@ export class ProjectsService {
     };
   }
 
+  async addMembers(
+    projectId: string,
+    addProjectMemberDto: AddProjectMemberDto,
+    userId: string,
+  ) {
+    await this.findOwnedActiveProject(projectId, userId);
+    const userIds = addProjectMemberDto.user_ids;
+
+    const users = await this.userRepository.find({
+      where: { user_id: In(userIds) },
+    });
+    const existingUserIds = new Set(users.map((user) => user.user_id));
+    const missingUserIds = userIds.filter((id) => !existingUserIds.has(id));
+
+    if (missingUserIds.length > 0) {
+      throw new NotFoundException({
+        message: 'Không tìm thấy user',
+        user_ids: missingUserIds,
+      });
+    }
+
+    const existingMembers = await this.projectMemberRepository.find({
+      where: {
+        project_id: projectId,
+        user_id: In(userIds),
+      },
+    });
+    const existingMemberIds = existingMembers.map((member) => member.user_id);
+
+    if (existingMemberIds.length > 0) {
+      throw new ConflictException({
+        message: 'User đã là thành viên của dự án',
+        user_ids: existingMemberIds,
+      });
+    }
+
+    const members = this.projectMemberRepository.create(
+      userIds.map((memberUserId) => ({
+        project_id: projectId,
+        user_id: memberUserId,
+        role: MemberRoleEnum.MEMBER,
+      })),
+    );
+
+    await this.projectMemberRepository.save(members);
+
+    return {
+      message: 'Đã thêm user vào dự án',
+      project_id: projectId,
+      user_ids: userIds,
+      role: MemberRoleEnum.MEMBER,
+    };
+  }
+
+  async removeMembers(
+    projectId: string,
+    removeProjectMembersDto: RemoveProjectMembersDto,
+    userId: string,
+  ) {
+    const project = await this.findOwnedActiveProject(projectId, userId);
+    const userIds = removeProjectMembersDto.user_ids;
+
+    if (userIds.includes(project.owner_id)) {
+      throw new ConflictException('Không thể xóa owner khỏi dự án');
+    }
+
+    const existingMembers = await this.projectMemberRepository.find({
+      where: {
+        project_id: projectId,
+        user_id: In(userIds),
+      },
+    });
+    const existingMemberIds = new Set(
+      existingMembers.map((member) => member.user_id),
+    );
+    const missingMemberIds = userIds.filter((id) => !existingMemberIds.has(id));
+
+    if (missingMemberIds.length > 0) {
+      throw new NotFoundException({
+        message: 'User không phải là thành viên của dự án',
+        user_ids: missingMemberIds,
+      });
+    }
+
+    await this.projectMemberRepository.delete({
+      project_id: projectId,
+      user_id: In(userIds),
+    });
+
+    return {
+      message: 'Đã xóa user khỏi dự án',
+      project_id: projectId,
+      user_ids: userIds,
+    };
+  }
+
+  /////////////////////////////////
+  
   private async findOwnedActiveProject(projectId: string, userId: string) {
     const project = await this.projectRepository.findOne({
       where: {

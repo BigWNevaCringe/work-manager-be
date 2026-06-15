@@ -15,7 +15,8 @@ describe('ProjectsController', () => {
           useValue: {
             create: jest.fn(),
             findOne: jest.fn(),
-            addMember: jest.fn(),
+            addMembers: jest.fn(),
+            removeMembers: jest.fn(),
             update: jest.fn(),
             remove: jest.fn(),
           },

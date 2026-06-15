@@ -14,8 +14,8 @@ describe('TasksController', () => {
           provide: TasksService,
           useValue: {
             create: jest.fn(),
-            assignUser: jest.fn(),
-            unassignUser: jest.fn(),
+            assignUsers: jest.fn(),
+            unassignUsers: jest.fn(),
             update: jest.fn(),
             remove: jest.fn(),
           },

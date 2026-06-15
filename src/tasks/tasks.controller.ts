@@ -12,6 +12,7 @@ import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { AssignTaskUserDto } from './dto/assign-task-user.dto';
+import { RemoveTaskAssigneesDto } from './dto/remove-task-assignees.dto';
 import { ApiOperation } from '@nestjs/swagger';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -36,28 +37,27 @@ export class TasksController {
   }
 
   @ApiOperation({
-    summary: 'Phân công user vào task - chỉ owner project được thao tác',
+    summary: 'Phân công nhiều user vào task - chỉ owner project được thao tác',
   })
-  @Post('assign-user/:id')
-  assignUser(
+  @Post(':id/assignees')
+  assignUsers(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() assignTaskUserDto: AssignTaskUserDto,
     @CurrentUser('sub') userId: string,
   ) {
-    return this.tasksService.assignUser(id, assignTaskUserDto, userId);
+    return this.tasksService.assignUsers(id, assignTaskUserDto, userId);
   }
 
   @ApiOperation({
-    summary: 'Gỡ user khỏi task - chỉ owner project được thao tác',
-    description: '/remove-user-from-task/{task_id}/{user_id}'
+    summary: 'Gỡ nhiều user khỏi task - chỉ owner project được thao tác',
   })
-  @Delete('/remove-user-from-task/:id/:userId')
-  unassignUser(
+  @Delete(':id/assignees')
+  unassignUsers(
     @Param('id', ParseUUIDPipe) id: string,
-    @Param('userId', ParseUUIDPipe) assigneeUserId: string,
+    @Body() removeTaskAssigneesDto: RemoveTaskAssigneesDto,
     @CurrentUser('sub') userId: string,
   ) {
-    return this.tasksService.unassignUser(id, assigneeUserId, userId);
+    return this.tasksService.unassignUsers(id, removeTaskAssigneesDto, userId);
   }
 
   @ApiOperation({

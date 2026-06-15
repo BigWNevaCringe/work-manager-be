@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { ArrayNotEmpty, ArrayUnique, IsArray, IsUUID } from 'class-validator';
 
-export class AddProjectMemberDto {
+export class RemoveProjectMembersDto {
   @ApiProperty({
     example: ['6132352f-013f-4fe6-bb6f-7b785497fbef'],
     type: [String],

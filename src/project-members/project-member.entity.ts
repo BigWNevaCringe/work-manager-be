@@ -5,6 +5,7 @@ import { User } from "../users/entities/user.entity";
 
 export enum MemberRoleEnum {
   OWNER = 'owner',
+  MANAGER = 'manager',
   MEMBER = 'member'
 }
 

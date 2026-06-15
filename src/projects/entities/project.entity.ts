@@ -10,9 +10,9 @@ import { ProjectMember } from '../../project-members/project-member.entity';
 import { Task } from '../../tasks/entities/task.entity';
 
 export enum StatusEnum {
-  ACTIVE = 'active',
-  ARCHIVED = 'archived',
-  COMPLETED = 'completed',
+  ACTIVE = 'active', // Project đang làm
+  ARCHIVED = 'archived', // Project đang tạm thời xóa
+  COMPLETED = 'completed', // Project đã hoàn thành
 }
 
 @Entity()

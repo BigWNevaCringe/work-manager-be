@@ -8,8 +8,9 @@ import {
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { AssignTaskUserDto } from './dto/assign-task-user.dto';
+import { RemoveTaskAssigneesDto } from './dto/remove-task-assignees.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Task } from './entities/task.entity';
 import { Project, StatusEnum } from '../projects/entities/project.entity';
 import { ProjectMember } from '../project-members/project-member.entity';
@@ -90,71 +91,103 @@ export class TasksService {
     };
   }
 
-  async assignUser(
+  async assignUsers(
     taskId: string,
     assignTaskUserDto: AssignTaskUserDto,
     userId: string,
   ) {
     const task = await this.findTaskOrFail(taskId);
+    const userIds = assignTaskUserDto.user_ids;
 
     await this.ensureProjectOwner(task.project_id, userId);
-    await this.ensureUserExists(assignTaskUserDto.user_id);
-    await this.ensureUserIsProjectMember(
-      task.project_id,
-      assignTaskUserDto.user_id,
-    );
+    await this.ensureUsersExist(userIds);
+    await this.ensureUsersAreProjectMembers(task.project_id, userIds);
 
-    const existingAssignee = await this.taskAssigneeRepository.findOne({
+    const existingAssignees = await this.taskAssigneeRepository.find({
       where: {
         task_id: taskId,
-        user_id: assignTaskUserDto.user_id,
+        user_id: In(userIds),
       },
     });
+    const existingAssigneeIds = existingAssignees.map(
+      (assignee) => assignee.user_id,
+    );
 
-    if (existingAssignee) {
-      throw new ConflictException('User đã được phân công vào task này');
+    if (existingAssigneeIds.length > 0) {
+      throw new ConflictException({
+        message: 'User đã được phân công vào task này',
+        user_ids: existingAssigneeIds,
+      });
     }
 
-    const assignee = this.taskAssigneeRepository.create({
-      task_id: taskId,
-      user_id: assignTaskUserDto.user_id,
-    });
+    const assignees = this.taskAssigneeRepository.create(
+      userIds.map((assigneeUserId) => ({
+        task_id: taskId,
+        user_id: assigneeUserId,
+      })),
+    );
 
-    await this.taskAssigneeRepository.save(assignee);
+    await this.taskAssigneeRepository.save(assignees);
 
     return {
       message: 'Đã phân công user vào task',
       task_id: taskId,
-      user_id: assignTaskUserDto.user_id,
+      user_ids: userIds,
     };
   }
 
-  async unassignUser(taskId: string, assigneeUserId: string, userId: string) {
+  async assignUser(
+    taskId: string,
+    assignTaskUserDto: AssignTaskUserDto,
+    userId: string,
+  ) {
+    return this.assignUsers(taskId, assignTaskUserDto, userId);
+  }
+
+  async unassignUsers(
+    taskId: string,
+    removeTaskAssigneesDto: RemoveTaskAssigneesDto,
+    userId: string,
+  ) {
     const task = await this.findTaskOrFail(taskId);
+    const userIds = removeTaskAssigneesDto.user_ids;
 
     await this.ensureProjectOwner(task.project_id, userId);
 
-    const assignee = await this.taskAssigneeRepository.findOne({
+    const assignees = await this.taskAssigneeRepository.find({
       where: {
         task_id: taskId,
-        user_id: assigneeUserId,
+        user_id: In(userIds),
       },
     });
+    const existingAssigneeIds = new Set(
+      assignees.map((assignee) => assignee.user_id),
+    );
+    const missingAssigneeIds = userIds.filter(
+      (id) => !existingAssigneeIds.has(id),
+    );
 
-    if (!assignee) {
-      throw new NotFoundException('User chưa được phân công vào task này');
+    if (missingAssigneeIds.length > 0) {
+      throw new NotFoundException({
+        message: 'User chưa được phân công vào task này',
+        user_ids: missingAssigneeIds,
+      });
     }
 
     await this.taskAssigneeRepository.delete({
       task_id: taskId,
-      user_id: assigneeUserId,
+      user_id: In(userIds),
     });
 
     return {
       message: 'Đã gỡ user khỏi task',
       task_id: taskId,
-      user_id: assigneeUserId,
+      user_ids: userIds,
     };
+  }
+
+  async unassignUser(taskId: string, assigneeUserId: string, userId: string) {
+    return this.unassignUsers(taskId, { user_ids: [assigneeUserId] }, userId);
   }
 
   private async ensureUserCanAccessProject(projectId: string, userId: string) {
@@ -210,6 +243,21 @@ export class TasksService {
     }
   }
 
+  private async ensureUsersExist(userIds: string[]) {
+    const users = await this.userRepository.find({
+      where: { user_id: In(userIds) },
+    });
+    const existingUserIds = new Set(users.map((user) => user.user_id));
+    const missingUserIds = userIds.filter((id) => !existingUserIds.has(id));
+
+    if (missingUserIds.length > 0) {
+      throw new NotFoundException({
+        message: 'Không tìm thấy user',
+        user_ids: missingUserIds,
+      });
+    }
+  }
+
   private async ensureUserIsProjectMember(projectId: string, userId: string) {
     const member = await this.projectMemberRepository.findOne({
       where: {
@@ -222,6 +270,28 @@ export class TasksService {
       throw new BadRequestException(
         'User phải là thành viên của dự án trước khi được phân công task',
       );
+    }
+  }
+
+  private async ensureUsersAreProjectMembers(
+    projectId: string,
+    userIds: string[],
+  ) {
+    const members = await this.projectMemberRepository.find({
+      where: {
+        project_id: projectId,
+        user_id: In(userIds),
+      },
+    });
+    const memberIds = new Set(members.map((member) => member.user_id));
+    const nonMemberIds = userIds.filter((id) => !memberIds.has(id));
+
+    if (nonMemberIds.length > 0) {
+      throw new BadRequestException({
+        message:
+          'User phải là thành viên của dự án trước khi được phân công task',
+        user_ids: nonMemberIds,
+      });
     }
   }
 

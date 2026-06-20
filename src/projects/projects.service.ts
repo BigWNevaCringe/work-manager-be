@@ -20,7 +20,7 @@ import {
 } from '../project-members/project-member.entity';
 import { Task } from '../tasks/entities/task.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
-import { User } from '../users/entities/user.entity';
+import { User, UserRoleEnum } from '../users/entities/user.entity';
 
 type FormattedTaskBase = {
   task_id: string;
@@ -102,17 +102,22 @@ export class ProjectsService {
   }
 
   async findOneByProjectId(id: string, userId: string) {
-    const project = await this.projectRepository
+    const query = this.projectRepository
       .createQueryBuilder('project')
-      .innerJoin('project.members', 'currentMember')
       .leftJoinAndSelect('project.members', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('project.tasks', 'task')
       .leftJoinAndSelect('task.assignees', 'taskAssignee')
       .leftJoinAndSelect('taskAssignee.user', 'taskAssigneeUser')
-      .where('currentMember.project_id = :id', { id })
-      .andWhere('currentMember.user_id = :userId', { userId })
-      .getOne();
+      .where('project.project_id = :id', { id });
+
+    if (!(await this.isSystemAdmin(userId))) {
+      query
+        .innerJoin('project.members', 'currentMember')
+        .andWhere('currentMember.user_id = :userId', { userId });
+    }
+
+    const project = await query.getOne();
 
     if (!project) {
       throw new NotFoundException('Không tìm thấy dự án');
@@ -122,52 +127,61 @@ export class ProjectsService {
   }
 
   async findActive(userId: string) {
-    const projects = await this.projectRepository
+    const query = this.projectRepository
       .createQueryBuilder('project')
-      .innerJoin('project.members', 'currentMember')
       .leftJoinAndSelect('project.members', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('project.tasks', 'task')
       .leftJoinAndSelect('task.assignees', 'taskAssignee')
       .leftJoinAndSelect('taskAssignee.user', 'taskAssigneeUser')
-      .where('currentMember.user_id = :userId', { userId })
-      .andWhere('project.status = :status', { status: StatusEnum.ACTIVE })
-      .orderBy('project.position', 'ASC')
-      .getMany();
+      .where('project.status = :status', { status: StatusEnum.ACTIVE })
+      .orderBy('project.position', 'ASC');
+    if (!(await this.isSystemAdmin(userId))) {
+      query
+        .innerJoin('project.members', 'currentMember')
+        .andWhere('currentMember.user_id = :userId', { userId });
+    }
+    const projects = await query.getMany();
 
     return projects.map((project) => this.formatProject(project));
   }
 
   async findCompleted(userId: string) {
-    const projects = await this.projectRepository
+    const query = this.projectRepository
       .createQueryBuilder('project')
-      .innerJoin('project.members', 'currentMember')
       .leftJoinAndSelect('project.members', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('project.tasks', 'task')
       .leftJoinAndSelect('task.assignees', 'taskAssignee')
       .leftJoinAndSelect('taskAssignee.user', 'taskAssigneeUser')
-      .where('currentMember.user_id = :userId', { userId })
-      .andWhere('project.status = :status', { status: StatusEnum.COMPLETED })
-      .orderBy('project.position', 'ASC')
-      .getMany();
+      .where('project.status = :status', { status: StatusEnum.COMPLETED })
+      .orderBy('project.position', 'ASC');
+    if (!(await this.isSystemAdmin(userId))) {
+      query
+        .innerJoin('project.members', 'currentMember')
+        .andWhere('currentMember.user_id = :userId', { userId });
+    }
+    const projects = await query.getMany();
 
     return projects.map((project) => this.formatProject(project));
   }
 
   async findArchived(userId: string) {
-    const projects = await this.projectRepository
+    const query = this.projectRepository
       .createQueryBuilder('project')
-      .innerJoin('project.members', 'currentMember')
       .leftJoinAndSelect('project.members', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('project.tasks', 'task')
       .leftJoinAndSelect('task.assignees', 'taskAssignee')
       .leftJoinAndSelect('taskAssignee.user', 'taskAssigneeUser')
-      .where('currentMember.user_id = :userId', { userId })
-      .andWhere('project.status = :status', { status: StatusEnum.ARCHIVED })
-      .orderBy('project.position', 'ASC')
-      .getMany();
+      .where('project.status = :status', { status: StatusEnum.ARCHIVED })
+      .orderBy('project.position', 'ASC');
+    if (!(await this.isSystemAdmin(userId))) {
+      query
+        .innerJoin('project.members', 'currentMember')
+        .andWhere('currentMember.user_id = :userId', { userId });
+    }
+    const projects = await query.getMany();
 
     return projects.map((project) => this.formatProject(project));
   }
@@ -217,14 +231,19 @@ export class ProjectsService {
   }
 
   async reorder(reorderProjectsDto: ReorderProjectsDto, userId: string) {
-    const memberships = await this.projectMemberRepository.find({
-      where: { user_id: userId },
-    });
+    const isAdmin = await this.isSystemAdmin(userId);
+    const memberships = isAdmin
+      ? []
+      : await this.projectMemberRepository.find({ where: { user_id: userId } });
     const projects = await this.projectRepository.find({
-      where: {
-        project_id: In(memberships.map((membership) => membership.project_id)),
-        status: reorderProjectsDto.status,
-      },
+      where: isAdmin
+        ? { status: reorderProjectsDto.status }
+        : {
+            project_id: In(
+              memberships.map((membership) => membership.project_id),
+            ),
+            status: reorderProjectsDto.status,
+          },
     });
     const projectIds = new Set(projects.map((project) => project.project_id));
 
@@ -432,7 +451,7 @@ export class ProjectsService {
       throw new NotFoundException('Không tìm thấy dự án');
     }
 
-    if (project.owner_id !== userId) {
+    if (project.owner_id !== userId && !(await this.isSystemAdmin(userId))) {
       throw new ForbiddenException('Bạn không có quyền thao tác với dự án này');
     }
 
@@ -448,7 +467,7 @@ export class ProjectsService {
       throw new NotFoundException('Không tìm thấy dự án');
     }
 
-    if (project.owner_id !== userId) {
+    if (project.owner_id !== userId && !(await this.isSystemAdmin(userId))) {
       throw new ForbiddenException('Bạn không có quyền thao tác với dự án này');
     }
 
@@ -564,5 +583,12 @@ export class ProjectsService {
       .getRawOne<{ max: string | number }>();
 
     return Number(result?.max ?? 0) + 1;
+  }
+
+  private async isSystemAdmin(userId: string) {
+    const user = await this.userRepository.findOne({
+      where: { user_id: userId },
+    });
+    return user?.role === UserRoleEnum.ADMIN;
   }
 }

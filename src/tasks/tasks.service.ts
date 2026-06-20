@@ -19,7 +19,7 @@ import {
   ProjectMember,
 } from '../project-members/project-member.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
-import { User } from '../users/entities/user.entity';
+import { User, UserRoleEnum } from '../users/entities/user.entity';
 
 @Injectable()
 export class TasksService {
@@ -310,6 +310,19 @@ export class TasksService {
   }
 
   private async getActiveProjectMembership(projectId: string, userId: string) {
+    if (await this.isSystemAdmin(userId)) {
+      const project = await this.projectRepository.findOne({
+        where: { project_id: projectId, status: StatusEnum.ACTIVE },
+      });
+      if (!project) throw new NotFoundException('Không tìm thấy dự án');
+
+      return {
+        project_id: projectId,
+        user_id: userId,
+        role: MemberRoleEnum.OWNER,
+      } as ProjectMember;
+    }
+
     await this.ensureUserCanAccessProject(projectId, userId);
     return (await this.projectMemberRepository.findOne({
       where: { project_id: projectId, user_id: userId },
@@ -328,6 +341,13 @@ export class TasksService {
     return role === MemberRoleEnum.OWNER || role === MemberRoleEnum.MANAGER;
   }
 
+  private async isSystemAdmin(userId: string) {
+    const user = await this.userRepository.findOne({
+      where: { user_id: userId },
+    });
+    return user?.role === UserRoleEnum.ADMIN;
+  }
+
   private async isTaskAssignee(taskId: string, userId: string) {
     return Boolean(
       await this.taskAssigneeRepository.findOne({
@@ -342,18 +362,40 @@ export class TasksService {
     canManage: boolean,
     isAssignee: boolean,
   ) {
-    const assigneeTransitions: Partial<Record<TaskStatus, TaskStatus[]>> = {
+    const memberStatuses = [
+      TaskStatus.TODO,
+      TaskStatus.PROGRESS,
+      TaskStatus.SUBMITTED,
+    ];
+
+    const managerTransitions: Partial<Record<TaskStatus, TaskStatus[]>> = {
       [TaskStatus.TODO]: [TaskStatus.PROGRESS],
-      [TaskStatus.PROGRESS]: [TaskStatus.SUBMITTED],
-      [TaskStatus.REJECT]: [TaskStatus.PROGRESS],
-    };
-    const reviewerTransitions: Partial<Record<TaskStatus, TaskStatus[]>> = {
-      [TaskStatus.SUBMITTED]: [TaskStatus.REVIEW],
+      [TaskStatus.PROGRESS]: [TaskStatus.TODO, TaskStatus.SUBMITTED],
+      [TaskStatus.SUBMITTED]: [
+        TaskStatus.PROGRESS,
+        TaskStatus.REVIEW,
+        TaskStatus.REJECT,
+      ],
       [TaskStatus.REVIEW]: [TaskStatus.REJECT, TaskStatus.DONE],
+      [TaskStatus.REJECT]: [TaskStatus.PROGRESS, TaskStatus.SUBMITTED],
+      [TaskStatus.DONE]: [TaskStatus.REVIEW],
     };
 
-    if (isAssignee && assigneeTransitions[current]?.includes(next)) return;
-    if (canManage && reviewerTransitions[current]?.includes(next)) return;
+    if (canManage && managerTransitions[current]?.includes(next)) return;
+    if (
+      isAssignee &&
+      memberStatuses.includes(current) &&
+      memberStatuses.includes(next)
+    ) {
+      return;
+    }
+    if (
+      isAssignee &&
+      current === TaskStatus.REJECT &&
+      [TaskStatus.TODO, TaskStatus.PROGRESS].includes(next)
+    ) {
+      return;
+    }
 
     throw new ForbiddenException('Bạn không có quyền chuyển trạng thái này');
   }

@@ -1,12 +1,18 @@
-
-import { Entity, Column, ManyToOne, JoinColumn, CreateDateColumn, PrimaryColumn } from "typeorm";
-import { Project } from "../projects/entities/project.entity";
-import { User } from "../users/entities/user.entity";
+import {
+  Entity,
+  Column,
+  ManyToOne,
+  JoinColumn,
+  CreateDateColumn,
+  PrimaryColumn,
+} from 'typeorm';
+import { Project } from '../projects/entities/project.entity';
+import { User } from '../users/entities/user.entity';
 
 export enum MemberRoleEnum {
   OWNER = 'owner',
   MANAGER = 'manager',
-  MEMBER = 'member'
+  MEMBER = 'member',
 }
 
 @Entity('project_members')
@@ -25,7 +31,11 @@ export class ProjectMember {
   @JoinColumn({ name: 'user_id' })
   user!: User;
 
-  @Column({ type: 'enum', enum: MemberRoleEnum, default: MemberRoleEnum.MEMBER })
+  @Column({
+    type: 'enum',
+    enum: MemberRoleEnum,
+    default: MemberRoleEnum.MEMBER,
+  })
   role!: MemberRoleEnum;
 
   @CreateDateColumn({ type: 'timestamptz' })

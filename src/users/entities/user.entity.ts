@@ -9,6 +9,10 @@ import {
 import { ProjectMember } from '../../project-members/project-member.entity';
 import { TaskAssignee } from '../../task-assignees/task-assignee.entity';
 
+export enum UserRoleEnum {
+  ADMIN = 'admin',
+  USER = 'user',
+}
 
 @Entity()
 export class User {
@@ -23,6 +27,9 @@ export class User {
 
   @Column({ nullable: true })
   avatar_url?: string;
+
+  @Column({ type: 'enum', enum: UserRoleEnum, default: UserRoleEnum.USER })
+  role!: UserRoleEnum;
 
   @Column({ select: false })
   password!: string;

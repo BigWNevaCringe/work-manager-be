@@ -3,11 +3,11 @@ import {
   ExecutionContext,
   Injectable,
   UnauthorizedException,
-} from "@nestjs/common";
-import { JwtService } from "@nestjs/jwt";
-import { Request } from "express";
-import { ConfigService } from "@nestjs/config";
-import { JwtPayload } from "../types/types";
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { Request } from 'express';
+import { ConfigService } from '@nestjs/config';
+import { JwtPayload } from '../types/types';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -24,9 +24,9 @@ export class AuthGuard implements CanActivate {
     }
     try {
       const payload = await this.jwtService.verifyAsync(token, {
-        secret: this.configService.get<string>("JWT_SECRET"),
+        secret: this.configService.get<string>('JWT_SECRET'),
       });
-      request["user"] = payload as JwtPayload;
+      request['user'] = payload as JwtPayload;
     } catch {
       throw new UnauthorizedException();
     }
@@ -36,13 +36,13 @@ export class AuthGuard implements CanActivate {
   private extractToken(request: Request): string | undefined {
     return (
       this.extractTokenFromHeader(request) ??
-      this.extractTokenFromCookie(request, "access_token")
+      this.extractTokenFromCookie(request, 'access_token')
     );
   }
 
   private extractTokenFromHeader(request: Request): string | undefined {
-    const [type, token] = request.headers.authorization?.split(" ") ?? [];
-    return type === "Bearer" ? token : undefined;
+    const [type, token] = request.headers.authorization?.split(' ') ?? [];
+    return type === 'Bearer' ? token : undefined;
   }
 
   private extractTokenFromCookie(
@@ -52,7 +52,7 @@ export class AuthGuard implements CanActivate {
     const cookieHeader = request.headers.cookie;
     if (!cookieHeader) return undefined;
 
-    const cookies = cookieHeader.split(";").map((cookie) => cookie.trim());
+    const cookies = cookieHeader.split(';').map((cookie) => cookie.trim());
     const tokenCookie = cookies.find((cookie) =>
       cookie.startsWith(`${cookieName}=`),
     );

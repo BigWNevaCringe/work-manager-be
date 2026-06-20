@@ -32,8 +32,11 @@ export class Project {
   @Column({ type: 'enum', enum: StatusEnum, default: StatusEnum.ACTIVE })
   status!: StatusEnum;
 
+  @Column({ type: 'float', default: 0 })
+  position!: number;
+
   @Column({ type: 'timestamptz', nullable: true })
-  archived_at?: Date;
+  archived_at?: Date | null;
 
   @OneToMany(() => ProjectMember, (pm) => pm.project)
   members!: ProjectMember[];

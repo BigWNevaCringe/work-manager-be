@@ -13,6 +13,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { AssignTaskUserDto } from './dto/assign-task-user.dto';
 import { RemoveTaskAssigneesDto } from './dto/remove-task-assignees.dto';
+import { ReorderTasksDto } from './dto/reorder-tasks.dto';
 import { ApiOperation } from '@nestjs/swagger';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -64,6 +65,18 @@ export class TasksController {
     summary: 'Cập nhật thông tin task - dựa vào task_id',
     description:
       'Nếu cập nhật subtask thì truyền thêm "parent_task_id" là "task_id" của task cha còn không thì không truyền',
+  })
+  @Patch('project/:id/reorder')
+  reorder(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() reorderTasksDto: ReorderTasksDto,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.tasksService.reorder(id, reorderTasksDto, userId);
+  }
+
+  @ApiOperation({
+    summary: 'Cập nhật thông tin, trạng thái, độ ưu tiên và tiến độ task',
   })
   @Patch(':id')
   update(

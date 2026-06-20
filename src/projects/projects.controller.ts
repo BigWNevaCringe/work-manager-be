@@ -12,6 +12,10 @@ import {
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { UpdateProjectStatusDto } from './dto/update-project-status.dto';
+import { ReorderProjectsDto } from './dto/reorder-projects.dto';
+import { UpdateProjectMemberRoleDto } from './dto/update-project-member-role.dto';
+import { Query } from '@nestjs/common';
 import { AddProjectMemberDto } from './dto/add-project-member.dto';
 import { RemoveProjectMembersDto } from './dto/remove-project-members.dto';
 import { AuthGuard } from '../common/guards/auth.guard';
@@ -56,6 +60,16 @@ export class ProjectsController {
     return this.projectsService.findActive(userId);
   }
 
+  @ApiOperation({ summary: 'Tìm user có thể thêm vào project - chỉ owner' })
+  @Get(':id/member-candidates')
+  findMemberCandidates(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('search') search: string,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.projectsService.findMemberCandidates(id, search, userId);
+  }
+
   @ApiOperation({
     summary: 'Lấy thông tin project bằng project_id',
   })
@@ -69,7 +83,7 @@ export class ProjectsController {
 
   @ApiOperation({
     summary: 'Thêm nhiều user vào project - chỉ owner được thao tác',
-    description: 'Truyền project_id trên url và body payload với user_id'
+    description: 'Truyền project_id trên url và body payload với user_id',
   })
   @Post(':id/members')
   addMembers(
@@ -82,7 +96,7 @@ export class ProjectsController {
 
   @ApiOperation({
     summary: 'Xóa nhiều user khỏi project - chỉ owner được thao tác',
-    description: 'Truyền project_id trên url và body payload với user_id'
+    description: 'Truyền project_id trên url và body payload với user_id',
   })
   @Delete(':id/members')
   removeMembers(
@@ -97,6 +111,26 @@ export class ProjectsController {
     );
   }
 
+  @ApiOperation({ summary: 'Phân quyền manager/member - chỉ owner' })
+  @Patch(':id/members/:memberId/role')
+  updateMemberRole(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('memberId', ParseUUIDPipe) memberId: string,
+    @Body() dto: UpdateProjectMemberRoleDto,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.projectsService.updateMemberRole(id, memberId, dto, userId);
+  }
+
+  @ApiOperation({ summary: 'Cập nhật thông tin dự án' })
+  @Patch('reorder')
+  reorder(
+    @Body() reorderProjectsDto: ReorderProjectsDto,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.projectsService.reorder(reorderProjectsDto, userId);
+  }
+
   @ApiOperation({ summary: 'Cập nhật thông tin dự án' })
   @Patch(':id')
   update(
@@ -105,6 +139,20 @@ export class ProjectsController {
     @CurrentUser('sub') userId: string,
   ) {
     return this.projectsService.update(id, updateProjectDto, userId);
+  }
+
+  @ApiOperation({ summary: 'Cập nhật trạng thái dự án' })
+  @Patch(':id/status')
+  updateStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateProjectStatusDto: UpdateProjectStatusDto,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.projectsService.updateStatus(
+      id,
+      updateProjectStatusDto,
+      userId,
+    );
   }
 
   @ApiOperation({

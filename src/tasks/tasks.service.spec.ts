@@ -2,15 +2,17 @@ import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Task } from './entities/task.entity';
+import { Task, TaskPriorityEnum, TaskStatus } from './entities/task.entity';
 import { Project } from '../projects/entities/project.entity';
 import { ProjectMember } from '../project-members/project-member.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
 import { User } from '../users/entities/user.entity';
+import { MemberRoleEnum } from '../project-members/project-member.entity';
 
 describe('TasksService', () => {
   let service: TasksService;
@@ -39,11 +41,16 @@ describe('TasksService', () => {
     taskRepository.findOne.mockResolvedValue({
       task_id: taskId,
       project_id: projectId,
+      status: TaskStatus.PROGRESS,
     });
     projectRepository.findOne.mockResolvedValue({
       project_id: projectId,
       owner_id: ownerId,
       status: 'active',
+    });
+    projectMemberRepository.findOne.mockResolvedValue({
+      user_id: ownerId,
+      role: MemberRoleEnum.OWNER,
     });
   };
 
@@ -85,6 +92,151 @@ describe('TasksService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  describe('update', () => {
+    it('updates task status, priority and progress', async () => {
+      mockTaskAndOwner();
+      taskAssigneeRepository.findOne.mockResolvedValue({ user_id: ownerId });
+
+      await service.update(
+        taskId,
+        {
+          priority: TaskPriorityEnum.HIGH,
+          progress: 100,
+        },
+        ownerId,
+      );
+
+      expect(taskRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: TaskStatus.PROGRESS,
+          priority: TaskPriorityEnum.HIGH,
+          progress: 100,
+        }),
+      );
+    });
+
+    it('allows an assigned member to submit work', async () => {
+      taskRepository.findOne.mockResolvedValue({
+        task_id: taskId,
+        project_id: projectId,
+        status: TaskStatus.PROGRESS,
+        progress: 70,
+      });
+      projectRepository.findOne.mockResolvedValue({
+        project_id: projectId,
+        status: 'active',
+      });
+      projectMemberRepository.findOne.mockResolvedValue({
+        user_id: firstUserId,
+        role: MemberRoleEnum.MEMBER,
+      });
+      taskAssigneeRepository.findOne.mockResolvedValue({
+        task_id: taskId,
+        user_id: firstUserId,
+      });
+
+      await service.update(
+        taskId,
+        { status: TaskStatus.SUBMITTED },
+        firstUserId,
+      );
+
+      expect(taskRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: TaskStatus.SUBMITTED }),
+      );
+    });
+
+    it('does not allow a member to edit task details', async () => {
+      taskRepository.findOne.mockResolvedValue({
+        task_id: taskId,
+        project_id: projectId,
+        status: TaskStatus.PROGRESS,
+      });
+      projectRepository.findOne.mockResolvedValue({
+        project_id: projectId,
+        status: 'active',
+      });
+      projectMemberRepository.findOne.mockResolvedValue({
+        user_id: firstUserId,
+        role: MemberRoleEnum.MEMBER,
+      });
+
+      await expect(
+        service.update(taskId, { title: 'Not allowed' }, firstUserId),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('allows a manager to review submitted work', async () => {
+      taskRepository.findOne.mockResolvedValue({
+        task_id: taskId,
+        project_id: projectId,
+        status: TaskStatus.SUBMITTED,
+      });
+      projectRepository.findOne.mockResolvedValue({
+        project_id: projectId,
+        status: 'active',
+      });
+      projectMemberRepository.findOne.mockResolvedValue({
+        user_id: firstUserId,
+        role: MemberRoleEnum.MANAGER,
+      });
+      taskAssigneeRepository.findOne.mockResolvedValue(null);
+
+      await service.update(taskId, { status: TaskStatus.REVIEW }, firstUserId);
+
+      expect(taskRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: TaskStatus.REVIEW }),
+      );
+    });
+  });
+
+  describe('reorder', () => {
+    it('updates sibling positions in the requested order', async () => {
+      projectRepository.findOne.mockResolvedValue({
+        project_id: projectId,
+        status: 'active',
+      });
+      projectMemberRepository.findOne.mockResolvedValue({
+        user_id: ownerId,
+        role: MemberRoleEnum.OWNER,
+      });
+      taskRepository.find.mockResolvedValue([
+        { task_id: taskId, project_id: projectId, position: 1 },
+        { task_id: firstUserId, project_id: projectId, position: 2 },
+      ]);
+
+      await service.reorder(
+        projectId,
+        { task_ids: [firstUserId, taskId] },
+        ownerId,
+      );
+
+      expect(taskRepository.save).toHaveBeenCalledWith([
+        expect.objectContaining({ task_id: firstUserId, position: 1 }),
+        expect.objectContaining({ task_id: taskId, position: 2 }),
+      ]);
+    });
+
+    it('rejects an incomplete sibling list', async () => {
+      projectRepository.findOne.mockResolvedValue({
+        project_id: projectId,
+        status: 'active',
+      });
+      projectMemberRepository.findOne.mockResolvedValue({
+        user_id: ownerId,
+        role: MemberRoleEnum.OWNER,
+      });
+      taskRepository.find.mockResolvedValue([
+        { task_id: taskId, project_id: projectId, position: 1 },
+        { task_id: firstUserId, project_id: projectId, position: 2 },
+      ]);
+
+      await expect(
+        service.reorder(projectId, { task_ids: [taskId] }, ownerId),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
   });
 
   describe('assignUsers', () => {

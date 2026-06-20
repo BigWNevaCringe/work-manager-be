@@ -2,18 +2,22 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Project } from './entities/project.entity';
+import { Project, StatusEnum } from './entities/project.entity';
 import {
   MemberRoleEnum,
   ProjectMember,
 } from '../project-members/project-member.entity';
 import { User } from '../users/entities/user.entity';
+import { Task } from '../tasks/entities/task.entity';
+import { TaskAssignee } from '../task-assignees/task-assignee.entity';
 
 describe('ProjectsService', () => {
   let service: ProjectsService;
   let projectRepository: Record<string, jest.Mock>;
   let projectMemberRepository: Record<string, jest.Mock>;
   let userRepository: Record<string, jest.Mock>;
+  let taskRepository: Record<string, jest.Mock>;
+  let taskAssigneeRepository: Record<string, jest.Mock>;
 
   const createRepositoryMock = () => ({
     create: jest.fn((value) => value),
@@ -43,6 +47,9 @@ describe('ProjectsService', () => {
     projectRepository = createRepositoryMock();
     projectMemberRepository = createRepositoryMock();
     userRepository = createRepositoryMock();
+    taskRepository = createRepositoryMock();
+    taskAssigneeRepository = createRepositoryMock();
+    taskRepository.find.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -59,6 +66,14 @@ describe('ProjectsService', () => {
           provide: getRepositoryToken(User),
           useValue: userRepository,
         },
+        {
+          provide: getRepositoryToken(Task),
+          useValue: taskRepository,
+        },
+        {
+          provide: getRepositoryToken(TaskAssignee),
+          useValue: taskAssigneeRepository,
+        },
       ],
     }).compile();
 
@@ -67,6 +82,109 @@ describe('ProjectsService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  describe('update', () => {
+    it('updates an active project', async () => {
+      mockOwnedProject();
+
+      await service.update(
+        projectId,
+        { project_name: '', project_description: 'Updated description' },
+        ownerId,
+      );
+
+      expect(projectRepository.findOne).toHaveBeenCalledWith({
+        where: {
+          project_id: projectId,
+          status: StatusEnum.ACTIVE,
+        },
+      });
+      expect(projectRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          project_description: 'Updated description',
+        }),
+      );
+    });
+
+    it('does not update a completed or archived project', async () => {
+      projectRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.update(
+          projectId,
+          { project_name: '', project_description: 'Updated description' },
+          ownerId,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(projectRepository.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateStatus', () => {
+    it('changes status regardless of the current project status', async () => {
+      projectRepository.findOne.mockResolvedValue({
+        ...activeProject,
+        status: StatusEnum.COMPLETED,
+      });
+
+      await service.updateStatus(
+        projectId,
+        { status: StatusEnum.ACTIVE },
+        ownerId,
+      );
+
+      expect(projectRepository.findOne).toHaveBeenCalledWith({
+        where: { project_id: projectId },
+      });
+      expect(projectRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: StatusEnum.ACTIVE }),
+      );
+    });
+  });
+
+  describe('reorder', () => {
+    it('updates project positions in the requested order', async () => {
+      projectMemberRepository.find.mockResolvedValue([
+        { project_id: projectId, user_id: ownerId },
+        { project_id: firstUserId, user_id: ownerId },
+      ]);
+      projectRepository.find.mockResolvedValue([
+        { project_id: projectId, status: StatusEnum.ACTIVE, position: 1 },
+        { project_id: firstUserId, status: StatusEnum.ACTIVE, position: 2 },
+      ]);
+
+      await service.reorder(
+        {
+          status: StatusEnum.ACTIVE,
+          project_ids: [firstUserId, projectId],
+        },
+        ownerId,
+      );
+
+      expect(projectRepository.save).toHaveBeenCalledWith([
+        expect.objectContaining({ project_id: firstUserId, position: 1 }),
+        expect.objectContaining({ project_id: projectId, position: 2 }),
+      ]);
+    });
+
+    it('rejects an incomplete project list', async () => {
+      projectMemberRepository.find.mockResolvedValue([
+        { project_id: projectId, user_id: ownerId },
+        { project_id: firstUserId, user_id: ownerId },
+      ]);
+      projectRepository.find.mockResolvedValue([
+        { project_id: projectId, status: StatusEnum.ACTIVE, position: 1 },
+        { project_id: firstUserId, status: StatusEnum.ACTIVE, position: 2 },
+      ]);
+
+      await expect(
+        service.reorder(
+          { status: StatusEnum.ACTIVE, project_ids: [projectId] },
+          ownerId,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
   });
 
   describe('addMembers', () => {
@@ -152,6 +270,9 @@ describe('ProjectsService', () => {
   describe('removeMembers', () => {
     it('removes multiple users from a project', async () => {
       mockOwnedProject();
+      taskRepository.find.mockResolvedValue([
+        { task_id: '66666666-6666-6666-6666-666666666666' },
+      ]);
       projectMemberRepository.find.mockResolvedValue([
         { user_id: firstUserId },
         { user_id: secondUserId },
@@ -165,6 +286,10 @@ describe('ProjectsService', () => {
 
       expect(projectMemberRepository.delete).toHaveBeenCalledWith({
         project_id: projectId,
+        user_id: expect.any(Object),
+      });
+      expect(taskAssigneeRepository.delete).toHaveBeenCalledWith({
+        task_id: expect.any(Object),
         user_id: expect.any(Object),
       });
       expect(result).toEqual({

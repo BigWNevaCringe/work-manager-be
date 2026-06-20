@@ -6,6 +6,9 @@ import {
 } from '@nestjs/common';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { UpdateProjectStatusDto } from './dto/update-project-status.dto';
+import { ReorderProjectsDto } from './dto/reorder-projects.dto';
+import { UpdateProjectMemberRoleDto } from './dto/update-project-member-role.dto';
 import { AddProjectMemberDto } from './dto/add-project-member.dto';
 import { RemoveProjectMembersDto } from './dto/remove-project-members.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -16,6 +19,7 @@ import {
   ProjectMember,
 } from '../project-members/project-member.entity';
 import { Task } from '../tasks/entities/task.entity';
+import { TaskAssignee } from '../task-assignees/task-assignee.entity';
 import { User } from '../users/entities/user.entity';
 
 type FormattedTaskBase = {
@@ -54,14 +58,24 @@ export class ProjectsService {
     private readonly projectMemberRepository: Repository<ProjectMember>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Task)
+    private readonly taskRepository: Repository<Task>,
+    @InjectRepository(TaskAssignee)
+    private readonly taskAssigneeRepository: Repository<TaskAssignee>,
   ) {}
 
   async create(createProjectDto: CreateProjectDto, userId: string) {
     await this.checkExistingName(createProjectDto.project_name, userId);
 
+    const position = await this.getNextProjectPosition(
+      userId,
+      StatusEnum.ACTIVE,
+    );
+
     const project = this.projectRepository.create({
       ...createProjectDto,
       owner_id: userId,
+      position,
     });
 
     const savedProject = await this.projectRepository.save(project);
@@ -88,7 +102,7 @@ export class ProjectsService {
   }
 
   async findOneByProjectId(id: string, userId: string) {
-    const projects = await this.projectRepository
+    const project = await this.projectRepository
       .createQueryBuilder('project')
       .innerJoin('project.members', 'currentMember')
       .leftJoinAndSelect('project.members', 'member')
@@ -98,9 +112,13 @@ export class ProjectsService {
       .leftJoinAndSelect('taskAssignee.user', 'taskAssigneeUser')
       .where('currentMember.project_id = :id', { id })
       .andWhere('currentMember.user_id = :userId', { userId })
-      .getMany();
+      .getOne();
 
-    return projects.map((project) => this.formatProject(project));
+    if (!project) {
+      throw new NotFoundException('Không tìm thấy dự án');
+    }
+
+    return this.formatProject(project);
   }
 
   async findActive(userId: string) {
@@ -114,6 +132,7 @@ export class ProjectsService {
       .leftJoinAndSelect('taskAssignee.user', 'taskAssigneeUser')
       .where('currentMember.user_id = :userId', { userId })
       .andWhere('project.status = :status', { status: StatusEnum.ACTIVE })
+      .orderBy('project.position', 'ASC')
       .getMany();
 
     return projects.map((project) => this.formatProject(project));
@@ -130,6 +149,7 @@ export class ProjectsService {
       .leftJoinAndSelect('taskAssignee.user', 'taskAssigneeUser')
       .where('currentMember.user_id = :userId', { userId })
       .andWhere('project.status = :status', { status: StatusEnum.COMPLETED })
+      .orderBy('project.position', 'ASC')
       .getMany();
 
     return projects.map((project) => this.formatProject(project));
@@ -146,6 +166,7 @@ export class ProjectsService {
       .leftJoinAndSelect('taskAssignee.user', 'taskAssigneeUser')
       .where('currentMember.user_id = :userId', { userId })
       .andWhere('project.status = :status', { status: StatusEnum.ARCHIVED })
+      .orderBy('project.position', 'ASC')
       .getMany();
 
     return projects.map((project) => this.formatProject(project));
@@ -176,6 +197,63 @@ export class ProjectsService {
       project_id: project.project_id,
       status: project.status,
       archived_at: project.archived_at,
+    };
+  }
+
+  async updateStatus(
+    id: string,
+    updateProjectStatusDto: UpdateProjectStatusDto,
+    userId: string,
+  ) {
+    const project = await this.findOwnedProject(id, userId);
+
+    project.status = updateProjectStatusDto.status;
+    project.archived_at =
+      updateProjectStatusDto.status === StatusEnum.ARCHIVED ? new Date() : null;
+
+    const savedProject = await this.projectRepository.save(project);
+
+    return this.formatProject(savedProject);
+  }
+
+  async reorder(reorderProjectsDto: ReorderProjectsDto, userId: string) {
+    const memberships = await this.projectMemberRepository.find({
+      where: { user_id: userId },
+    });
+    const projects = await this.projectRepository.find({
+      where: {
+        project_id: In(memberships.map((membership) => membership.project_id)),
+        status: reorderProjectsDto.status,
+      },
+    });
+    const projectIds = new Set(projects.map((project) => project.project_id));
+
+    if (
+      projects.length !== reorderProjectsDto.project_ids.length ||
+      reorderProjectsDto.project_ids.some((id) => !projectIds.has(id))
+    ) {
+      throw new ConflictException(
+        'Danh sách sắp xếp phải chứa đầy đủ project cùng trạng thái',
+      );
+    }
+
+    const projectsById = new Map(
+      projects.map((project) => [project.project_id, project]),
+    );
+    const reorderedProjects = reorderProjectsDto.project_ids.map(
+      (projectId, index) => {
+        const project = projectsById.get(projectId)!;
+        project.position = index + 1;
+        return project;
+      },
+    );
+
+    await this.projectRepository.save(reorderedProjects);
+
+    return {
+      message: 'Đã cập nhật thứ tự project',
+      status: reorderProjectsDto.status,
+      project_ids: reorderProjectsDto.project_ids,
     };
   }
 
@@ -233,6 +311,58 @@ export class ProjectsService {
     };
   }
 
+  async findMemberCandidates(
+    projectId: string,
+    search: string,
+    userId: string,
+  ) {
+    await this.findOwnedActiveProject(projectId, userId);
+
+    const existingMembers = await this.projectMemberRepository.find({
+      where: { project_id: projectId },
+    });
+    const existingIds = existingMembers.map((member) => member.user_id);
+    const query = this.userRepository
+      .createQueryBuilder('user')
+      .select(['user.user_id', 'user.name', 'user.email', 'user.avatar_url'])
+      .orderBy('user.name', 'ASC')
+      .take(20);
+
+    if (search?.trim()) {
+      query.where('(user.name ILIKE :search OR user.email ILIKE :search)', {
+        search: `%${search.trim()}%`,
+      });
+    }
+
+    if (existingIds.length > 0) {
+      query.andWhere('user.user_id NOT IN (:...existingIds)', { existingIds });
+    }
+
+    return query.getMany();
+  }
+
+  async updateMemberRole(
+    projectId: string,
+    memberId: string,
+    dto: UpdateProjectMemberRoleDto,
+    userId: string,
+  ) {
+    const project = await this.findOwnedActiveProject(projectId, userId);
+    if (memberId === project.owner_id) {
+      throw new ConflictException('Không thể thay đổi role của owner');
+    }
+
+    const member = await this.projectMemberRepository.findOne({
+      where: { project_id: projectId, user_id: memberId },
+    });
+    if (!member) throw new NotFoundException('User không thuộc project');
+
+    member.role = dto.role;
+    await this.projectMemberRepository.save(member);
+
+    return { project_id: projectId, user_id: memberId, role: member.role };
+  }
+
   async removeMembers(
     projectId: string,
     removeProjectMembersDto: RemoveProjectMembersDto,
@@ -263,6 +393,19 @@ export class ProjectsService {
       });
     }
 
+    const projectTasks = await this.taskRepository.find({
+      where: { project_id: projectId },
+      select: { task_id: true },
+    });
+    const taskIds = projectTasks.map((task) => task.task_id);
+
+    if (taskIds.length > 0) {
+      await this.taskAssigneeRepository.delete({
+        task_id: In(taskIds),
+        user_id: In(userIds),
+      });
+    }
+
     await this.projectMemberRepository.delete({
       project_id: projectId,
       user_id: In(userIds),
@@ -276,13 +419,29 @@ export class ProjectsService {
   }
 
   /////////////////////////////////
-  
+
   private async findOwnedActiveProject(projectId: string, userId: string) {
     const project = await this.projectRepository.findOne({
       where: {
         project_id: projectId,
         status: StatusEnum.ACTIVE,
       },
+    });
+
+    if (!project) {
+      throw new NotFoundException('Không tìm thấy dự án');
+    }
+
+    if (project.owner_id !== userId) {
+      throw new ForbiddenException('Bạn không có quyền thao tác với dự án này');
+    }
+
+    return project;
+  }
+
+  private async findOwnedProject(projectId: string, userId: string) {
+    const project = await this.projectRepository.findOne({
+      where: { project_id: projectId },
     });
 
     if (!project) {
@@ -350,6 +509,7 @@ export class ProjectsService {
 
         if (parentTask) {
           const { subtasks, ...subtask } = task;
+          void subtasks;
           parentTask.subtasks.push(subtask);
           continue;
         }
@@ -393,5 +553,16 @@ export class ProjectsService {
     if (existing) {
       throw new ConflictException('Tên dự án đã tồn tại');
     }
+  }
+
+  private async getNextProjectPosition(userId: string, status: StatusEnum) {
+    const result = await this.projectRepository
+      .createQueryBuilder('project')
+      .select('COALESCE(MAX(project.position), 0)', 'max')
+      .where('project.owner_id = :userId', { userId })
+      .andWhere('project.status = :status', { status })
+      .getRawOne<{ max: string | number }>();
+
+    return Number(result?.max ?? 0) + 1;
   }
 }

@@ -7,7 +7,8 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from './entities/user.entity';
+import { User, UserRoleEnum } from './entities/user.entity';
+import { ForbiddenException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -39,7 +40,12 @@ export class UsersService {
     };
   }
 
-  async findAll() {
+  async findAll(currentUserId: string) {
+    const currentUser = await this.findOne(currentUserId);
+    if (currentUser.role !== UserRoleEnum.ADMIN) {
+      throw new ForbiddenException('Chỉ admin được xem toàn bộ tài khoản');
+    }
+
     return await this.userRepository.find();
   }
 
@@ -61,6 +67,7 @@ export class UsersService {
   }
 
   update(user_id: string, updateUserDto: UpdateUserDto) {
+    void updateUserDto;
     return `This action updates a #${user_id} user`;
   }
 

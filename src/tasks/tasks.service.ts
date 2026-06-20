@@ -9,11 +9,15 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { AssignTaskUserDto } from './dto/assign-task-user.dto';
 import { RemoveTaskAssigneesDto } from './dto/remove-task-assignees.dto';
+import { ReorderTasksDto } from './dto/reorder-tasks.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { Task } from './entities/task.entity';
+import { Task, TaskStatus } from './entities/task.entity';
 import { Project, StatusEnum } from '../projects/entities/project.entity';
-import { ProjectMember } from '../project-members/project-member.entity';
+import {
+  MemberRoleEnum,
+  ProjectMember,
+} from '../project-members/project-member.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
 import { User } from '../users/entities/user.entity';
 
@@ -37,7 +41,7 @@ export class TasksService {
     createTaskDto: CreateTaskDto,
     userId: string,
   ) {
-    await this.ensureUserCanAccessProject(projectId, userId);
+    await this.ensureCanManageProject(projectId, userId);
 
     if (createTaskDto.parent_task_id) {
       await this.ensureParentTaskInProject(
@@ -66,23 +70,112 @@ export class TasksService {
   async update(id: string, updateTaskDto: UpdateTaskDto, userId: string) {
     const task = await this.findTaskOrFail(id);
 
-    await this.ensureUserCanAccessProject(task.project_id, userId);
+    const membership = await this.getActiveProjectMembership(
+      task.project_id,
+      userId,
+    );
+    const canManage = this.isManager(membership.role);
 
-    if (updateTaskDto.title !== undefined) {
-      task.title = updateTaskDto.title;
+    if (
+      !canManage &&
+      (updateTaskDto.title !== undefined ||
+        updateTaskDto.description !== undefined ||
+        updateTaskDto.priority !== undefined)
+    ) {
+      throw new ForbiddenException(
+        'Chỉ owner hoặc manager được sửa thông tin task',
+      );
     }
 
-    if (updateTaskDto.description !== undefined) {
-      task.description = updateTaskDto.description;
+    const isAssignee = await this.isTaskAssignee(task.task_id, userId);
+
+    if (updateTaskDto.progress !== undefined) {
+      if (!isAssignee) {
+        throw new ForbiddenException('Chỉ assignee được cập nhật tiến độ');
+      }
+      if (![TaskStatus.PROGRESS, TaskStatus.REJECT].includes(task.status)) {
+        throw new BadRequestException(
+          'Chỉ cập nhật tiến độ khi task đang thực hiện hoặc bị reject',
+        );
+      }
+      if (updateTaskDto.progress < 1 || updateTaskDto.progress > 100) {
+        throw new BadRequestException('Tiến độ phải từ 1 đến 100');
+      }
     }
+
+    if (
+      updateTaskDto.status !== undefined &&
+      updateTaskDto.status !== task.status
+    ) {
+      this.validateStatusTransition(
+        task.status,
+        updateTaskDto.status,
+        canManage,
+        isAssignee,
+      );
+      if (updateTaskDto.status === TaskStatus.TODO) task.progress = 0;
+      if (updateTaskDto.status === TaskStatus.DONE) task.progress = 100;
+    }
+
+    Object.assign(task, updateTaskDto);
+    if (task.status === TaskStatus.TODO) task.progress = 0;
+    if (task.status === TaskStatus.DONE) task.progress = 100;
 
     return this.taskRepository.save(task);
+  }
+
+  async reorder(
+    projectId: string,
+    reorderTasksDto: ReorderTasksDto,
+    userId: string,
+  ) {
+    await this.ensureCanManageProject(projectId, userId);
+
+    const tasks = await this.taskRepository.find({
+      where: reorderTasksDto.parent_task_id
+        ? {
+            project_id: projectId,
+            parent_task_id: reorderTasksDto.parent_task_id,
+          }
+        : { project_id: projectId },
+    });
+    const siblings = tasks.filter(
+      (task) =>
+        (task.parent_task_id ?? null) ===
+        (reorderTasksDto.parent_task_id ?? null),
+    );
+    const siblingIds = new Set(siblings.map((task) => task.task_id));
+
+    if (
+      siblings.length !== reorderTasksDto.task_ids.length ||
+      reorderTasksDto.task_ids.some((taskId) => !siblingIds.has(taskId))
+    ) {
+      throw new BadRequestException(
+        'Danh sách sắp xếp phải chứa đầy đủ task cùng cấp',
+      );
+    }
+
+    const tasksById = new Map(siblings.map((task) => [task.task_id, task]));
+    const reorderedTasks = reorderTasksDto.task_ids.map((taskId, index) => {
+      const task = tasksById.get(taskId)!;
+      task.position = index + 1;
+      return task;
+    });
+
+    await this.taskRepository.save(reorderedTasks);
+
+    return {
+      message: 'Đã cập nhật thứ tự task',
+      project_id: projectId,
+      parent_task_id: reorderTasksDto.parent_task_id ?? null,
+      task_ids: reorderTasksDto.task_ids,
+    };
   }
 
   async remove(id: string, userId: string) {
     const task = await this.findTaskOrFail(id);
 
-    await this.ensureUserCanAccessProject(task.project_id, userId);
+    await this.ensureCanManageProject(task.project_id, userId);
     await this.deleteTaskWithSubtasks(id);
 
     return {
@@ -99,7 +192,7 @@ export class TasksService {
     const task = await this.findTaskOrFail(taskId);
     const userIds = assignTaskUserDto.user_ids;
 
-    await this.ensureProjectOwner(task.project_id, userId);
+    await this.ensureCanManageProject(task.project_id, userId);
     await this.ensureUsersExist(userIds);
     await this.ensureUsersAreProjectMembers(task.project_id, userIds);
 
@@ -152,7 +245,7 @@ export class TasksService {
     const task = await this.findTaskOrFail(taskId);
     const userIds = removeTaskAssigneesDto.user_ids;
 
-    await this.ensureProjectOwner(task.project_id, userId);
+    await this.ensureCanManageProject(task.project_id, userId);
 
     const assignees = await this.taskAssigneeRepository.find({
       where: {
@@ -214,6 +307,55 @@ export class TasksService {
         'Bạn không có quyền thao tác trong dự án này',
       );
     }
+  }
+
+  private async getActiveProjectMembership(projectId: string, userId: string) {
+    await this.ensureUserCanAccessProject(projectId, userId);
+    return (await this.projectMemberRepository.findOne({
+      where: { project_id: projectId, user_id: userId },
+    }))!;
+  }
+
+  private async ensureCanManageProject(projectId: string, userId: string) {
+    const membership = await this.getActiveProjectMembership(projectId, userId);
+    if (!this.isManager(membership.role)) {
+      throw new ForbiddenException('Chỉ owner hoặc manager được thao tác');
+    }
+    return membership;
+  }
+
+  private isManager(role: MemberRoleEnum) {
+    return role === MemberRoleEnum.OWNER || role === MemberRoleEnum.MANAGER;
+  }
+
+  private async isTaskAssignee(taskId: string, userId: string) {
+    return Boolean(
+      await this.taskAssigneeRepository.findOne({
+        where: { task_id: taskId, user_id: userId },
+      }),
+    );
+  }
+
+  private validateStatusTransition(
+    current: TaskStatus,
+    next: TaskStatus,
+    canManage: boolean,
+    isAssignee: boolean,
+  ) {
+    const assigneeTransitions: Partial<Record<TaskStatus, TaskStatus[]>> = {
+      [TaskStatus.TODO]: [TaskStatus.PROGRESS],
+      [TaskStatus.PROGRESS]: [TaskStatus.SUBMITTED],
+      [TaskStatus.REJECT]: [TaskStatus.PROGRESS],
+    };
+    const reviewerTransitions: Partial<Record<TaskStatus, TaskStatus[]>> = {
+      [TaskStatus.SUBMITTED]: [TaskStatus.REVIEW],
+      [TaskStatus.REVIEW]: [TaskStatus.REJECT, TaskStatus.DONE],
+    };
+
+    if (isAssignee && assigneeTransitions[current]?.includes(next)) return;
+    if (canManage && reviewerTransitions[current]?.includes(next)) return;
+
+    throw new ForbiddenException('Bạn không có quyền chuyển trạng thái này');
   }
 
   private async ensureProjectOwner(projectId: string, userId: string) {

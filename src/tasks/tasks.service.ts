@@ -55,6 +55,8 @@ export class TasksService {
       createTaskDto.parent_task_id,
     );
 
+    this.validateTaskDates(createTaskDto.start_date, createTaskDto.due_date);
+
     const task = this.taskRepository.create({
       title: createTaskDto.title,
       description: createTaskDto.description,
@@ -62,6 +64,12 @@ export class TasksService {
       project_id: projectId,
       created_by: userId,
       position,
+      start_date: createTaskDto.start_date
+        ? new Date(createTaskDto.start_date)
+        : undefined,
+      due_date: createTaskDto.due_date
+        ? new Date(createTaskDto.due_date)
+        : undefined,
     });
 
     return this.taskRepository.save(task);
@@ -80,7 +88,9 @@ export class TasksService {
       !canManage &&
       (updateTaskDto.title !== undefined ||
         updateTaskDto.description !== undefined ||
-        updateTaskDto.priority !== undefined)
+        updateTaskDto.priority !== undefined ||
+        updateTaskDto.start_date !== undefined ||
+        updateTaskDto.due_date !== undefined)
     ) {
       throw new ForbiddenException(
         'Chỉ owner hoặc manager được sửa thông tin task',
@@ -88,6 +98,21 @@ export class TasksService {
     }
 
     const isAssignee = await this.isTaskAssignee(task.task_id, userId);
+
+    if (
+      updateTaskDto.start_date !== undefined ||
+      updateTaskDto.due_date !== undefined
+    ) {
+      const startDate =
+        updateTaskDto.start_date === undefined
+          ? task.start_date
+          : updateTaskDto.start_date;
+      const dueDate =
+        updateTaskDto.due_date === undefined
+          ? task.due_date
+          : updateTaskDto.due_date;
+      this.validateTaskDates(startDate, dueDate);
+    }
 
     if (updateTaskDto.progress !== undefined) {
       if (!isAssignee) {
@@ -117,7 +142,18 @@ export class TasksService {
       if (updateTaskDto.status === TaskStatus.DONE) task.progress = 100;
     }
 
-    Object.assign(task, updateTaskDto);
+    Object.assign(task, updateTaskDto, {
+      ...(updateTaskDto.start_date !== undefined && {
+        start_date: updateTaskDto.start_date
+          ? new Date(updateTaskDto.start_date)
+          : null,
+      }),
+      ...(updateTaskDto.due_date !== undefined && {
+        due_date: updateTaskDto.due_date
+          ? new Date(updateTaskDto.due_date)
+          : null,
+      }),
+    });
     if (task.status === TaskStatus.TODO) task.progress = 0;
     if (task.status === TaskStatus.DONE) task.progress = 100;
 
@@ -398,6 +434,19 @@ export class TasksService {
     }
 
     throw new ForbiddenException('Bạn không có quyền chuyển trạng thái này');
+  }
+
+  private validateTaskDates(
+    startDate?: string | Date | null,
+    dueDate?: string | Date | null,
+  ) {
+    if (!startDate || !dueDate) return;
+
+    if (new Date(dueDate).getTime() < new Date(startDate).getTime()) {
+      throw new BadRequestException(
+        'Ngày kết thúc không được trước ngày bắt đầu',
+      );
+    }
   }
 
   private async ensureProjectOwner(projectId: string, userId: string) {

@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEnum,
+  IsDateString,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -42,4 +43,14 @@ export class UpdateTaskDto {
   @Min(0)
   @Max(100)
   progress?: number;
+
+  @ApiPropertyOptional({ example: '2026-06-21T00:00:00.000Z', nullable: true })
+  @IsOptional()
+  @IsDateString()
+  start_date?: string | null;
+
+  @ApiPropertyOptional({ example: '2026-06-30T00:00:00.000Z', nullable: true })
+  @IsOptional()
+  @IsDateString()
+  due_date?: string | null;
 }

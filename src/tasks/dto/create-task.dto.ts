@@ -1,5 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  IsDateString,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
 
 export class CreateTaskDto {
   @ApiProperty({ example: 'Design dashboard layout' })
@@ -18,4 +24,14 @@ export class CreateTaskDto {
   @IsOptional()
   @IsUUID()
   parent_task_id?: string;
+
+  @ApiPropertyOptional({ example: '2026-06-21T00:00:00.000Z' })
+  @IsOptional()
+  @IsDateString()
+  start_date?: string | null;
+
+  @ApiPropertyOptional({ example: '2026-06-30T00:00:00.000Z' })
+  @IsOptional()
+  @IsDateString()
+  due_date?: string | null;
 }

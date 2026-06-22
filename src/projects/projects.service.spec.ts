@@ -10,6 +10,7 @@ import {
 import { User } from '../users/entities/user.entity';
 import { Task } from '../tasks/entities/task.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
+import { Comment } from '../comments/entities/comment.entity';
 
 describe('ProjectsService', () => {
   let service: ProjectsService;
@@ -18,6 +19,7 @@ describe('ProjectsService', () => {
   let userRepository: Record<string, jest.Mock>;
   let taskRepository: Record<string, jest.Mock>;
   let taskAssigneeRepository: Record<string, jest.Mock>;
+  let commentRepository: Record<string, jest.Mock>;
 
   const createRepositoryMock = () => ({
     create: jest.fn((value) => value),
@@ -49,6 +51,7 @@ describe('ProjectsService', () => {
     userRepository = createRepositoryMock();
     taskRepository = createRepositoryMock();
     taskAssigneeRepository = createRepositoryMock();
+    commentRepository = createRepositoryMock();
     taskRepository.find.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
@@ -73,6 +76,10 @@ describe('ProjectsService', () => {
         {
           provide: getRepositoryToken(TaskAssignee),
           useValue: taskAssigneeRepository,
+        },
+        {
+          provide: getRepositoryToken(Comment),
+          useValue: commentRepository,
         },
       ],
     }).compile();
@@ -140,6 +147,41 @@ describe('ProjectsService', () => {
       expect(projectRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: StatusEnum.ACTIVE }),
       );
+    });
+  });
+
+  describe('permanentlyRemove', () => {
+    it('deletes an archived project and its related records', async () => {
+      projectRepository.findOne.mockResolvedValue({
+        ...activeProject,
+        status: StatusEnum.ARCHIVED,
+      });
+      taskRepository.find.mockResolvedValue([
+        { task_id: '66666666-6666-6666-6666-666666666666' },
+      ]);
+
+      await service.permanentlyRemove(projectId, ownerId);
+
+      expect(commentRepository.delete).toHaveBeenCalledWith({
+        project_id: projectId,
+      });
+      expect(taskAssigneeRepository.delete).toHaveBeenCalled();
+      expect(taskRepository.delete).toHaveBeenCalledTimes(2);
+      expect(projectMemberRepository.delete).toHaveBeenCalledWith({
+        project_id: projectId,
+      });
+      expect(projectRepository.delete).toHaveBeenCalledWith({
+        project_id: projectId,
+      });
+    });
+
+    it('rejects permanent deletion unless the project is archived', async () => {
+      mockOwnedProject();
+
+      await expect(
+        service.permanentlyRemove(projectId, ownerId),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(projectRepository.delete).not.toHaveBeenCalled();
     });
   });
 

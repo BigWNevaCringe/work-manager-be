@@ -12,7 +12,7 @@ import { UpdateProjectMemberRoleDto } from './dto/update-project-member-role.dto
 import { AddProjectMemberDto } from './dto/add-project-member.dto';
 import { RemoveProjectMembersDto } from './dto/remove-project-members.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Not, Repository } from 'typeorm';
 import { Project, StatusEnum } from './entities/project.entity';
 import {
   MemberRoleEnum,
@@ -21,6 +21,7 @@ import {
 import { Task } from '../tasks/entities/task.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
 import { User, UserRoleEnum } from '../users/entities/user.entity';
+import { Comment } from '../comments/entities/comment.entity';
 
 type FormattedTaskBase = {
   task_id: string;
@@ -62,6 +63,8 @@ export class ProjectsService {
     private readonly taskRepository: Repository<Task>,
     @InjectRepository(TaskAssignee)
     private readonly taskAssigneeRepository: Repository<TaskAssignee>,
+    @InjectRepository(Comment)
+    private readonly commentRepository: Repository<Comment>,
   ) {}
 
   async create(createProjectDto: CreateProjectDto, userId: string) {
@@ -212,6 +215,33 @@ export class ProjectsService {
       status: project.status,
       archived_at: project.archived_at,
     };
+  }
+
+  async permanentlyRemove(id: string, userId: string) {
+    const project = await this.findOwnedProject(id, userId);
+    if (project.status !== StatusEnum.ARCHIVED) {
+      throw new ConflictException('Chỉ có thể xóa vĩnh viễn dự án đã archived');
+    }
+
+    const tasks = await this.taskRepository.find({
+      where: { project_id: id },
+      select: { task_id: true },
+    });
+    const taskIds = tasks.map((task) => task.task_id);
+
+    await this.commentRepository.delete({ project_id: id });
+    if (taskIds.length > 0) {
+      await this.taskAssigneeRepository.delete({ task_id: In(taskIds) });
+      await this.taskRepository.delete({
+        project_id: id,
+        parent_task_id: Not(IsNull()),
+      });
+      await this.taskRepository.delete({ project_id: id });
+    }
+    await this.projectMemberRepository.delete({ project_id: id });
+    await this.projectRepository.delete({ project_id: id });
+
+    return { message: 'Đã xóa vĩnh viễn dự án', project_id: id };
   }
 
   async updateStatus(

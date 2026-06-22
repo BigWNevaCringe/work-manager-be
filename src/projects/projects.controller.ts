@@ -165,4 +165,13 @@ export class ProjectsController {
   ) {
     return this.projectsService.remove(id, userId);
   }
+
+  @ApiOperation({ summary: 'Xóa vĩnh viễn một dự án đã archived' })
+  @Delete(':id/permanent')
+  permanentlyRemove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.projectsService.permanentlyRemove(id, userId);
+  }
 }

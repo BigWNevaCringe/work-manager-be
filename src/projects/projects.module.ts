@@ -7,6 +7,7 @@ import { ProjectMember } from '../project-members/project-member.entity';
 import { User } from '../users/entities/user.entity';
 import { Task } from '../tasks/entities/task.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
+import { Comment } from '../comments/entities/comment.entity';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { TaskAssignee } from '../task-assignees/task-assignee.entity';
       User,
       Task,
       TaskAssignee,
+      Comment,
     ]),
   ],
   controllers: [ProjectsController],

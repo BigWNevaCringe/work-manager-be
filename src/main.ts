@@ -5,9 +5,11 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
 import { AllExceptionsFilter } from './common/exception-transform-filter/http-exception.filter';
 import { TransformInterceptor } from './common/exception-transform-filter/transform.interceptor';
+import { ConfigService } from '@nestjs/config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const configService = app.get(ConfigService);
 
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new TransformInterceptor());
@@ -33,9 +35,14 @@ async function bootstrap() {
     },
   });
 
-  // CORS đặt trước helmet
+  const corsOrigins = configService
+    .getOrThrow<string>('CORS_ORIGINS')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: ['http://localhost:3001', 'http://localhost:3000'],
+    origin: corsOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -43,6 +50,7 @@ async function bootstrap() {
 
   app.use(helmet());
 
-  await app.listen(process.env.PORT ?? 3001);
+  const port = configService.getOrThrow<number>('PORT');
+  await app.listen(port, '0.0.0.0');
 }
 bootstrap();

@@ -51,7 +51,7 @@ async function bootstrap() {
   app.use(helmet());
 
   const port = configService.getOrThrow<number>('PORT');
-  await app.listen(port, '0.0.0.0');
+  await app.listen(port);
   // 
 }
 bootstrap();

@@ -30,11 +30,29 @@ export class AuthService {
     if (!user) throw new UnauthorizedException('Tài khoản không tồn tại');
 
     // Nếu tìm thấy thì đem đi so sánh với mật khẩu trên server với mật khẩu vừa nhập
+    if (!user.password) {
+      throw new UnauthorizedException(
+        'Tài khoản này đang đăng nhập bằng Google',
+      );
+    }
+
     const match = await bcrypt.compare(loginDTO.password, user.password);
     if (!match) throw new UnauthorizedException('Sai email hoặc mật khẩu');
 
-    const payload = { sub: user.user_id, email: user.email };
+    return this.issueTokens({ user_id: user.user_id, email: user.email });
+  }
 
+  async loginWithGoogle(profile: {
+    email: string;
+    name: string;
+    avatar_url?: string | null;
+  }) {
+    const user = await this.usersService.upsertGoogleUser(profile);
+    return this.issueTokens({ user_id: user.user_id, email: user.email });
+  }
+
+  private issueTokens(user: { user_id: string; email: string }) {
+    const payload = { sub: user.user_id, email: user.email };
     const access_token = this.jwtService.sign(payload, {
       secret: this.configService.get<string>('JWT_SECRET'),
       expiresIn: this.configService.get<StringValue>('JWT_EXPIRATION_TIME'),

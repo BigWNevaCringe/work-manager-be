@@ -31,8 +31,8 @@ export class User {
   @Column({ type: 'enum', enum: UserRoleEnum, default: UserRoleEnum.USER })
   role!: UserRoleEnum;
 
-  @Column({ select: false })
-  password!: string;
+  @Column({ type: 'varchar', nullable: true, select: false })
+  password?: string | null;
 
   @OneToMany(() => ProjectMember, (pm) => pm.user)
   projectMembers!: ProjectMember[];

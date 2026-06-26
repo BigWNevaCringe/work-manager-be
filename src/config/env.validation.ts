@@ -6,6 +6,7 @@ const REQUIRED_VARIABLES = [
   'JWT_SECRET',
   'JWT_EXPIRATION_TIME',
   'JWT_REFRESH_EXPIRATION_TIME',
+  'BETTER_AUTH_BACKEND_SECRET',
 ] as const;
 
 function parseNumber(name: string, value: unknown, fallback?: number): number {

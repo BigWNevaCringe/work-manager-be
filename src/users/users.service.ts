@@ -66,6 +66,31 @@ export class UsersService {
     });
   }
 
+  async upsertGoogleUser(profile: {
+    email: string;
+    name: string;
+    avatar_url?: string | null;
+  }) {
+    const existingUser = await this.userRepository.findOne({
+      where: { email: profile.email },
+    });
+
+    if (existingUser) {
+      existingUser.name = existingUser.name || profile.name;
+      if (profile.avatar_url) existingUser.avatar_url = profile.avatar_url;
+      return this.userRepository.save(existingUser);
+    }
+
+    const user = this.userRepository.create({
+      email: profile.email,
+      name: profile.name,
+      avatar_url: profile.avatar_url ?? undefined,
+      password: null,
+    });
+
+    return this.userRepository.save(user);
+  }
+
   update(user_id: string, updateUserDto: UpdateUserDto) {
     void updateUserDto;
     return `This action updates a #${user_id} user`;

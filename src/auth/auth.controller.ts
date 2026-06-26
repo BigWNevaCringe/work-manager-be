@@ -6,6 +6,8 @@ import {
   Res,
   HttpCode,
   UseGuards,
+  Headers,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
@@ -23,6 +25,35 @@ export class AuthController {
     private readonly configService: ConfigService,
   ) {}
 
+  private setAuthCookies(
+    res: Response,
+    tokens: { access_token: string; refresh_token: string },
+  ) {
+    const secure = process.env.NODE_ENV === 'production';
+    const accessTokenMaxAge = ms(
+      this.configService.getOrThrow<StringValue>('JWT_EXPIRATION_TIME'),
+    );
+    const refreshTokenMaxAge = ms(
+      this.configService.getOrThrow<StringValue>('JWT_REFRESH_EXPIRATION_TIME'),
+    );
+
+    res.cookie('wm_access_token', tokens.access_token, {
+      httpOnly: true,
+      secure,
+      sameSite: 'strict',
+      maxAge: accessTokenMaxAge,
+      path: '/',
+    });
+
+    res.cookie('wm_refresh_token', tokens.refresh_token, {
+      httpOnly: true,
+      secure,
+      sameSite: 'strict',
+      maxAge: refreshTokenMaxAge,
+      path: '/',
+    });
+  }
+
   @ApiOperation({ summary: 'Đăng ký tài khoản' })
   @Post('register')
   register(@Body() dto: RegisterDto) {
@@ -36,35 +67,33 @@ export class AuthController {
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { access_token, refresh_token } = await this.authService.login(dto);
-    const secure = process.env.NODE_ENV === 'production';
-    const accessTokenMaxAge = ms(
-      this.configService.getOrThrow<StringValue>('JWT_EXPIRATION_TIME'),
-    );
-    const refreshTokenMaxAge = ms(
-      this.configService.getOrThrow<StringValue>('JWT_REFRESH_EXPIRATION_TIME'),
-    );
-
-    res.cookie('access_token', access_token, {
-      httpOnly: true,
-      secure,
-      sameSite: 'strict',
-      maxAge: accessTokenMaxAge,
-      path: '/',
-    });
-
-    res.cookie('refresh_token', refresh_token, {
-      httpOnly: true,
-      secure,
-      sameSite: 'strict',
-      maxAge: refreshTokenMaxAge,
-      path: '/',
-    });
+    const tokens = await this.authService.login(dto);
+    this.setAuthCookies(res, tokens);
 
     return {
       message: 'Đăng nhập thành công',
-      // access_token,
     };
+  }
+
+  @ApiOperation({ summary: 'Đăng nhập/đăng ký bằng Google từ Better Auth' })
+  @Post('oauth/google')
+  @HttpCode(200)
+  async loginWithGoogle(
+    @Body() dto: { email: string; name: string; avatar_url?: string | null },
+    @Headers('x-better-auth-secret') betterAuthSecret: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (
+      betterAuthSecret !==
+      this.configService.getOrThrow<string>('BETTER_AUTH_BACKEND_SECRET')
+    ) {
+      throw new UnauthorizedException();
+    }
+
+    const tokens = await this.authService.loginWithGoogle(dto);
+    this.setAuthCookies(res, tokens);
+
+    return { message: 'Đăng nhập Google thành công' };
   }
 
   @ApiOperation({ summary: 'Đăng xuất tài khoản' })
@@ -79,8 +108,8 @@ export class AuthController {
       path: '/',
     };
 
-    res.clearCookie('access_token', cookieOptions);
-    res.clearCookie('refresh_token', cookieOptions);
+    res.clearCookie('wm_access_token', cookieOptions);
+    res.clearCookie('wm_refresh_token', cookieOptions);
 
     return { message: 'Đăng xuất thành công' };
   }

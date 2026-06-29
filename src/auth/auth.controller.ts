@@ -8,6 +8,7 @@ import {
   UseGuards,
   Headers,
   UnauthorizedException,
+  Query,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
@@ -79,6 +80,34 @@ export class AuthController {
     this.setAuthCookies(res, tokens);
 
     return { message: 'Đăng nhập Google thành công' };
+  }
+
+  @ApiOperation({ summary: 'Chuyển hướng đăng nhập Google từ backend' })
+  @Get('google')
+  loginGoogle(@Res() res: Response) {
+    return res.redirect(this.authService.getGoogleAuthorizationUrl());
+  }
+
+  @ApiOperation({ summary: 'Google OAuth callback' })
+  @Get('google/callback')
+  async loginGoogleCallback(
+    @Query('code') code: string | undefined,
+    @Query('error') error: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const appUrl = this.configService.get<string>('APP_URL') ?? 'http://localhost:3000';
+
+    if (error || !code) {
+      return res.redirect(`${appUrl}/login?error=google`);
+    }
+
+    try {
+      const tokens = await this.authService.loginWithGoogleCode(code);
+      this.setAuthCookies(res, tokens);
+      return res.redirect(`${appUrl}/`);
+    } catch {
+      return res.redirect(`${appUrl}/login?error=google`);
+    }
   }
 
   @ApiOperation({ summary: 'Đăng xuất tài khoản' })

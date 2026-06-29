@@ -16,6 +16,7 @@ import {
 } from '../project-members/project-member.entity';
 import { Task } from '../tasks/entities/task.entity';
 import { User, UserRoleEnum } from '../users/entities/user.entity';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 @Injectable()
 export class CommentsService {
@@ -30,6 +31,7 @@ export class CommentsService {
     private readonly taskRepository: Repository<Task>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly realtimeGateway: RealtimeGateway,
   ) {}
 
   async findByProject(projectId: string, userId: string) {
@@ -63,10 +65,17 @@ export class CommentsService {
     });
     const saved = await this.commentRepository.save(comment);
 
-    return this.commentRepository.findOne({
+    const created = await this.commentRepository.findOne({
       where: { comment_id: saved.comment_id },
       relations: { user: true },
     });
+    if (created) {
+      this.realtimeGateway.emitProjectEvent(projectId, 'comment.created', {
+        comment: created,
+      });
+    }
+
+    return created;
   }
 
   async remove(commentId: string, userId: string) {
@@ -89,6 +98,9 @@ export class CommentsService {
     }
 
     await this.commentRepository.delete({ comment_id: commentId });
+    this.realtimeGateway.emitProjectEvent(comment.project_id, 'comment.deleted', {
+      comment_id: commentId,
+    });
     return { message: 'Đã xóa comment', comment_id: commentId };
   }
 
@@ -111,10 +123,17 @@ export class CommentsService {
     comment.content = content;
     comment.edited_at = new Date();
     await this.commentRepository.save(comment);
-    return this.commentRepository.findOne({
+    const updated = await this.commentRepository.findOne({
       where: { comment_id: commentId },
       relations: { user: true },
     });
+    if (updated) {
+      this.realtimeGateway.emitProjectEvent(updated.project_id, 'comment.updated', {
+        comment: updated,
+      });
+    }
+
+    return updated;
   }
 
   private async ensureProjectAccess(

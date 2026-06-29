@@ -9,6 +9,8 @@ import { TasksModule } from './tasks/tasks.module';
 import { AuthModule } from './auth/auth.module';
 import { CommentsModule } from './comments/comments.module';
 import { validateEnvironment } from './config/env.validation';
+import { RealtimeModule } from './realtime/realtime.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -36,6 +38,8 @@ import { validateEnvironment } from './config/env.validation';
     TasksModule,
     AuthModule,
     CommentsModule,
+    RealtimeModule,
+    NotificationsModule,
   ],
   controllers: [],
   providers: [],

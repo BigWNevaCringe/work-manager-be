@@ -59,6 +59,78 @@ export class AuthService {
     return this.issueTokens({ user_id: user.user_id, email: user.email });
   }
 
+  getGoogleAuthorizationUrl() {
+    const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
+    if (!clientId) {
+      throw new UnauthorizedException('Google OAuth chưa được cấu hình');
+    }
+
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.searchParams.set('client_id', clientId);
+    url.searchParams.set(
+      'redirect_uri',
+      this.configService.getOrThrow<string>('GOOGLE_CALLBACK_URL'),
+    );
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', 'openid email profile');
+    url.searchParams.set('prompt', 'select_account');
+
+    return url.toString();
+  }
+
+  async loginWithGoogleCode(code: string) {
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: this.configService.getOrThrow<string>('GOOGLE_CLIENT_ID'),
+        client_secret: this.configService.getOrThrow<string>(
+          'GOOGLE_CLIENT_SECRET',
+        ),
+        redirect_uri: this.configService.getOrThrow<string>(
+          'GOOGLE_CALLBACK_URL',
+        ),
+        grant_type: 'authorization_code',
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      throw new UnauthorizedException('Không thể xác thực Google');
+    }
+
+    const tokenData = (await tokenResponse.json()) as { access_token?: string };
+    if (!tokenData.access_token) {
+      throw new UnauthorizedException('Google không trả access token');
+    }
+
+    const profileResponse = await fetch(
+      'https://www.googleapis.com/oauth2/v3/userinfo',
+      {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      },
+    );
+
+    if (!profileResponse.ok) {
+      throw new UnauthorizedException('Không thể lấy thông tin Google');
+    }
+
+    const profile = (await profileResponse.json()) as {
+      email?: string;
+      name?: string;
+      picture?: string;
+    };
+    if (!profile.email) {
+      throw new UnauthorizedException('Google không trả email');
+    }
+
+    return this.loginWithGoogle({
+      email: profile.email,
+      name: profile.name || profile.email,
+      avatar_url: profile.picture ?? null,
+    });
+  }
+
   getAuthCookieOptions() {
     const secure = process.env.NODE_ENV === 'production';
     const baseOptions = {

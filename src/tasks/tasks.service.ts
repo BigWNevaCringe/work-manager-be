@@ -20,6 +20,9 @@ import {
 } from '../project-members/project-member.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
 import { User, UserRoleEnum } from '../users/entities/user.entity';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/entities/notification.entity';
 
 @Injectable()
 export class TasksService {
@@ -34,6 +37,8 @@ export class TasksService {
     private readonly taskAssigneeRepository: Repository<TaskAssignee>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly realtimeGateway: RealtimeGateway,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async create(
@@ -72,7 +77,12 @@ export class TasksService {
         : undefined,
     });
 
-    return this.taskRepository.save(task);
+    const savedTask = await this.taskRepository.save(task);
+    this.realtimeGateway.emitProjectEvent(task.project_id, 'task.updated', {
+      task: savedTask,
+    });
+
+    return savedTask;
   }
 
   async update(id: string, updateTaskDto: UpdateTaskDto, userId: string) {
@@ -177,7 +187,34 @@ export class TasksService {
     if (task.status === TaskStatus.TODO) task.progress = 0;
     if (task.status === TaskStatus.DONE) task.progress = 100;
 
-    return this.taskRepository.save(task);
+    const savedTask = await this.taskRepository.save(task);
+    this.realtimeGateway.emitProjectEvent(task.project_id, 'task.updated', {
+      task: savedTask,
+    });
+    if (updateTaskDto.status === TaskStatus.REJECT) {
+      const assignees = await this.taskAssigneeRepository.find({
+        where: { task_id: savedTask.task_id },
+      });
+      await this.notificationsService.createMany(
+        assignees.map((assignee) => ({
+          userId: assignee.user_id,
+          projectId: savedTask.project_id,
+          taskId: savedTask.task_id,
+          type: NotificationType.TASK_REJECTED,
+          title: 'Task bị từ chối',
+          message: `${savedTask.title}: ${
+            savedTask.rejection_reason ?? 'Cần cập nhật lại task'
+          }`,
+          metadata: { rejection_reason: savedTask.rejection_reason },
+        })),
+      );
+      this.realtimeGateway.emitProjectEvent(task.project_id, 'task.rejected', {
+        task: savedTask,
+        rejection_reason: savedTask.rejection_reason,
+      });
+    }
+
+    return savedTask;
   }
 
   async reorder(
@@ -277,6 +314,20 @@ export class TasksService {
     );
 
     await this.taskAssigneeRepository.save(assignees);
+    await this.notificationsService.createMany(
+      userIds.map((assignedUserId) => ({
+        userId: assignedUserId,
+        projectId: task.project_id,
+        taskId,
+        type: NotificationType.TASK_ASSIGNED,
+        title: 'Bạn được giao task',
+        message: task.title,
+      })),
+    );
+    this.realtimeGateway.emitProjectEvent(task.project_id, 'task.assigned', {
+      task_id: taskId,
+      user_ids: userIds,
+    });
 
     return {
       message: 'Đã phân công user vào task',
@@ -326,6 +377,10 @@ export class TasksService {
     await this.taskAssigneeRepository.delete({
       task_id: taskId,
       user_id: In(userIds),
+    });
+    this.realtimeGateway.emitProjectEvent(task.project_id, 'task.unassigned', {
+      task_id: taskId,
+      user_ids: userIds,
     });
 
     return {

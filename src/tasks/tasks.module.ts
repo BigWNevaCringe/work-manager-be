@@ -7,6 +7,8 @@ import { Project } from '../projects/entities/project.entity';
 import { ProjectMember } from '../project-members/project-member.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
 import { User } from '../users/entities/user.entity';
+import { RealtimeModule } from '../realtime/realtime.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -17,6 +19,8 @@ import { User } from '../users/entities/user.entity';
       TaskAssignee,
       User,
     ]),
+    RealtimeModule,
+    NotificationsModule,
   ],
   controllers: [TasksController],
   providers: [TasksService],

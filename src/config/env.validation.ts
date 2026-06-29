@@ -6,7 +6,6 @@ const REQUIRED_VARIABLES = [
   'JWT_SECRET',
   'JWT_EXPIRATION_TIME',
   'JWT_REFRESH_EXPIRATION_TIME',
-  'BETTER_AUTH_BACKEND_SECRET',
 ] as const;
 
 function parseNumber(name: string, value: unknown, fallback?: number): number {
@@ -54,5 +53,13 @@ export function validateEnvironment(
     DB_SYNC: synchronize,
     PORT: parseNumber('PORT', config.PORT, 3001),
     CORS_ORIGINS: String(config.CORS_ORIGINS ?? 'http://localhost:3000'),
+    APP_URL: String(config.APP_URL ?? 'http://localhost:3000'),
+    GOOGLE_CLIENT_ID: String(config.GOOGLE_CLIENT_ID ?? ''),
+    GOOGLE_CLIENT_SECRET: String(config.GOOGLE_CLIENT_SECRET ?? ''),
+    GOOGLE_CALLBACK_URL: String(
+      config.GOOGLE_CALLBACK_URL ??
+        'http://localhost:3001/api/v1/auth/google/callback',
+    ),
+    BETTER_AUTH_BACKEND_SECRET: String(config.BETTER_AUTH_BACKEND_SECRET ?? ''),
   };
 }

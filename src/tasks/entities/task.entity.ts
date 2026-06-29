@@ -58,6 +58,9 @@ export class Task {
   @Column({ type: 'float', default: 0 })
   progress!: number;
 
+  @Column({ type: 'text', nullable: true })
+  rejection_reason?: string | null;
+
   @Column({ type: 'float', default: 0 })
   position!: number;
 

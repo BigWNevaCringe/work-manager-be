@@ -31,6 +31,7 @@ type FormattedTaskBase = {
   status: Task['status'];
   priority: Task['priority'];
   progress: number;
+  rejection_reason?: string | null;
   position: number;
   start_date: Date;
   due_date: Date;
@@ -467,6 +468,52 @@ export class ProjectsService {
     };
   }
 
+  async leaveProject(projectId: string, userId: string) {
+    const project = await this.projectRepository.findOne({
+      where: { project_id: projectId, status: StatusEnum.ACTIVE },
+    });
+
+    if (!project) {
+      throw new NotFoundException('Không tìm thấy dự án');
+    }
+
+    if (project.owner_id === userId) {
+      throw new ConflictException('Owner không thể rời khỏi dự án của mình');
+    }
+
+    const member = await this.projectMemberRepository.findOne({
+      where: { project_id: projectId, user_id: userId },
+    });
+
+    if (!member) {
+      throw new NotFoundException('Bạn không phải là thành viên của dự án');
+    }
+
+    const projectTasks = await this.taskRepository.find({
+      where: { project_id: projectId },
+      select: { task_id: true },
+    });
+    const taskIds = projectTasks.map((task) => task.task_id);
+
+    if (taskIds.length > 0) {
+      await this.taskAssigneeRepository.delete({
+        task_id: In(taskIds),
+        user_id: userId,
+      });
+    }
+
+    await this.projectMemberRepository.delete({
+      project_id: projectId,
+      user_id: userId,
+    });
+
+    return {
+      message: 'Đã rời khỏi dự án',
+      project_id: projectId,
+      user_id: userId,
+    };
+  }
+
   /////////////////////////////////
 
   private async findOwnedActiveProject(projectId: string, userId: string) {
@@ -534,6 +581,7 @@ export class ProjectsService {
         status: task.status,
         priority: task.priority,
         progress: task.progress,
+        rejection_reason: task.rejection_reason,
         position: task.position,
         start_date: task.start_date,
         due_date: task.due_date,

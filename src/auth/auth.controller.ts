@@ -15,7 +15,6 @@ import type { Response } from 'express';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ConfigService } from '@nestjs/config';
-import ms, { StringValue } from 'ms';
 import { ApiOperation } from '@nestjs/swagger';
 
 @Controller('auth')
@@ -29,28 +28,14 @@ export class AuthController {
     res: Response,
     tokens: { access_token: string; refresh_token: string },
   ) {
-    const secure = process.env.NODE_ENV === 'production';
-    const accessTokenMaxAge = ms(
-      this.configService.getOrThrow<StringValue>('JWT_EXPIRATION_TIME'),
-    );
-    const refreshTokenMaxAge = ms(
-      this.configService.getOrThrow<StringValue>('JWT_REFRESH_EXPIRATION_TIME'),
-    );
+    const cookieOptions = this.authService.getAuthCookieOptions();
 
     res.cookie('wm_access_token', tokens.access_token, {
-      httpOnly: true,
-      secure,
-      sameSite: 'strict',
-      maxAge: accessTokenMaxAge,
-      path: '/',
+      ...cookieOptions.access,
     });
 
     res.cookie('wm_refresh_token', tokens.refresh_token, {
-      httpOnly: true,
-      secure,
-      sameSite: 'strict',
-      maxAge: refreshTokenMaxAge,
-      path: '/',
+      ...cookieOptions.refresh,
     });
   }
 
@@ -101,17 +86,12 @@ export class AuthController {
   @HttpCode(200)
   @UseGuards(AuthGuard)
   logout(@Res({ passthrough: true }) res: Response) {
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict' as const,
-      path: '/',
-    };
+    const result = this.authService.logout();
 
-    res.clearCookie('wm_access_token', cookieOptions);
-    res.clearCookie('wm_refresh_token', cookieOptions);
+    res.clearCookie('wm_access_token', result.cookies);
+    res.clearCookie('wm_refresh_token', result.cookies);
 
-    return { message: 'Đăng xuất thành công' };
+    return { message: result.message };
   }
 
   @ApiOperation({

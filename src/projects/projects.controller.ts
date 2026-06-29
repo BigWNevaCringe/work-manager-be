@@ -122,6 +122,15 @@ export class ProjectsController {
     return this.projectsService.updateMemberRole(id, memberId, dto, userId);
   }
 
+  @ApiOperation({ summary: 'Rời khỏi project - thành viên tự thao tác' })
+  @Delete(':id/members/me')
+  leaveProject(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.projectsService.leaveProject(id, userId);
+  }
+
   @ApiOperation({ summary: 'Cập nhật thông tin dự án' })
   @Patch('reorder')
   reorder(

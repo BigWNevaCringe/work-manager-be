@@ -30,6 +30,15 @@ export class UpdateTaskDto {
   status?: TaskStatus;
 
   @ApiPropertyOptional({
+    example: 'Thiếu ảnh nghiệm thu ở phần bàn giao',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty({ message: 'Lý do từ chối không được để trống' })
+  rejection_reason?: string | null;
+
+  @ApiPropertyOptional({
     enum: TaskPriorityEnum,
     example: TaskPriorityEnum.HIGH,
   })

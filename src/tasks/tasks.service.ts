@@ -83,6 +83,7 @@ export class TasksService {
       userId,
     );
     const canManage = this.isManager(membership.role);
+    const isOwner = membership.role === MemberRoleEnum.OWNER;
 
     if (
       !canManage &&
@@ -98,6 +99,8 @@ export class TasksService {
     }
 
     const isAssignee = await this.isTaskAssignee(task.task_id, userId);
+    const isOwnerSelfAssignedTask =
+      isOwner && (await this.isOnlyTaskAssignee(task.task_id, userId));
 
     if (
       updateTaskDto.start_date !== undefined ||
@@ -137,12 +140,29 @@ export class TasksService {
         updateTaskDto.status,
         canManage,
         isAssignee,
+        isOwnerSelfAssignedTask,
       );
       if (updateTaskDto.status === TaskStatus.TODO) task.progress = 0;
       if (updateTaskDto.status === TaskStatus.DONE) task.progress = 100;
+      if (updateTaskDto.status === TaskStatus.REJECT) {
+        const reason = updateTaskDto.rejection_reason?.trim();
+        if (!reason) {
+          throw new BadRequestException('Vui lòng nhập lý do từ chối task');
+        }
+        task.rejection_reason = reason;
+      }
+      if (
+        task.status === TaskStatus.REJECT &&
+        updateTaskDto.status === TaskStatus.PROGRESS
+      ) {
+        task.rejection_reason = null;
+      }
     }
 
     Object.assign(task, updateTaskDto, {
+      ...(updateTaskDto.rejection_reason !== undefined && {
+        rejection_reason: updateTaskDto.rejection_reason?.trim() || null,
+      }),
       ...(updateTaskDto.start_date !== undefined && {
         start_date: updateTaskDto.start_date
           ? new Date(updateTaskDto.start_date)
@@ -392,12 +412,44 @@ export class TasksService {
     );
   }
 
+  private async isOnlyTaskAssignee(taskId: string, userId: string) {
+    const assignees = await this.taskAssigneeRepository.find({
+      where: { task_id: taskId },
+      select: { user_id: true },
+    });
+
+    return (
+      assignees.length === 1 &&
+      assignees[0]?.user_id === userId
+    );
+  }
+
   private validateStatusTransition(
     current: TaskStatus,
     next: TaskStatus,
     canManage: boolean,
     isAssignee: boolean,
+    isOwnerSelfAssignedTask = false,
   ) {
+    if (isOwnerSelfAssignedTask) {
+      const ownerSelfStatuses = [
+        TaskStatus.TODO,
+        TaskStatus.PROGRESS,
+        TaskStatus.DONE,
+      ];
+
+      if (
+        ownerSelfStatuses.includes(current) &&
+        ownerSelfStatuses.includes(next)
+      ) {
+        return;
+      }
+
+      throw new ForbiddenException(
+        'Task tự giao cho owner chỉ được chuyển giữa todo, in progress và done',
+      );
+    }
+
     const memberStatuses = [
       TaskStatus.TODO,
       TaskStatus.PROGRESS,

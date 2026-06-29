@@ -8,7 +8,15 @@ import { LoginDto, RegisterDto } from './dto/auth.dto';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from '../users/users.service';
 import { ConfigService } from '@nestjs/config';
-import { StringValue } from 'ms';
+import ms, { StringValue } from 'ms';
+
+type AuthCookieOptions = {
+  httpOnly: true;
+  secure: boolean;
+  sameSite: 'strict';
+  path: '/';
+  maxAge?: number;
+};
 
 @Injectable()
 export class AuthService {
@@ -49,6 +57,41 @@ export class AuthService {
   }) {
     const user = await this.usersService.upsertGoogleUser(profile);
     return this.issueTokens({ user_id: user.user_id, email: user.email });
+  }
+
+  getAuthCookieOptions() {
+    const secure = process.env.NODE_ENV === 'production';
+    const baseOptions = {
+      httpOnly: true as const,
+      secure,
+      sameSite: 'strict' as const,
+      path: '/' as const,
+    };
+
+    return {
+      access: {
+        ...baseOptions,
+        maxAge: ms(
+          this.configService.getOrThrow<StringValue>('JWT_EXPIRATION_TIME'),
+        ),
+      },
+      refresh: {
+        ...baseOptions,
+        maxAge: ms(
+          this.configService.getOrThrow<StringValue>(
+            'JWT_REFRESH_EXPIRATION_TIME',
+          ),
+        ),
+      },
+      clear: baseOptions,
+    } satisfies Record<'access' | 'refresh' | 'clear', AuthCookieOptions>;
+  }
+
+  logout() {
+    return {
+      message: 'Đăng xuất thành công',
+      cookies: this.getAuthCookieOptions().clear,
+    };
   }
 
   private issueTokens(user: { user_id: string; email: string }) {

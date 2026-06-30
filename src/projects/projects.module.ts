@@ -8,6 +8,7 @@ import { User } from '../users/entities/user.entity';
 import { Task } from '../tasks/entities/task.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
 import { Comment } from '../comments/entities/comment.entity';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { Comment } from '../comments/entities/comment.entity';
       TaskAssignee,
       Comment,
     ]),
+    RealtimeModule,
   ],
   controllers: [ProjectsController],
   providers: [ProjectsService],

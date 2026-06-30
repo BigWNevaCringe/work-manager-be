@@ -22,6 +22,7 @@ import { Task } from '../tasks/entities/task.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
 import { User, UserRoleEnum } from '../users/entities/user.entity';
 import { Comment } from '../comments/entities/comment.entity';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 type FormattedTaskBase = {
   task_id: string;
@@ -66,6 +67,7 @@ export class ProjectsService {
     private readonly taskAssigneeRepository: Repository<TaskAssignee>,
     @InjectRepository(Comment)
     private readonly commentRepository: Repository<Comment>,
+    private readonly realtimeGateway: RealtimeGateway,
   ) {}
 
   async create(createProjectDto: CreateProjectDto, userId: string) {
@@ -181,9 +183,7 @@ export class ProjectsService {
       .where('project.status = :status', { status: StatusEnum.ARCHIVED })
       .orderBy('project.position', 'ASC');
     if (!(await this.isSystemAdmin(userId))) {
-      query
-        .innerJoin('project.members', 'currentMember')
-        .andWhere('currentMember.user_id = :userId', { userId });
+      query.andWhere('project.owner_id = :userId', { userId });
     }
     const projects = await query.getMany();
 
@@ -199,16 +199,45 @@ export class ProjectsService {
 
     Object.assign(project, updateProjectDto);
 
-    return this.projectRepository.save(project);
+    const savedProject = await this.projectRepository.save(project);
+    this.realtimeGateway.emitProjectEvent(id, 'project.updated', {
+      project: savedProject,
+    });
+
+    return savedProject;
   }
 
   async remove(id: string, userId: string) {
     const project = await this.findOwnedActiveProject(id, userId);
+    const memberIds = await this.getProjectMemberIds(id);
 
     project.status = StatusEnum.ARCHIVED;
     project.archived_at = new Date();
 
     await this.projectRepository.save(project);
+    this.realtimeGateway.emitProjectEvent(id, 'project.archived', {
+      project_id: project.project_id,
+      status: project.status,
+      archived_at: project.archived_at,
+    });
+    this.realtimeGateway.emitMemberProjectEvent(
+      memberIds,
+      'member.project.status.updated',
+      {
+        project_id: project.project_id,
+        status: project.status,
+        archived_at: project.archived_at,
+      },
+    );
+    this.realtimeGateway.emitMemberProjectEvent(
+      memberIds,
+      'member.project.deleted',
+      {
+        project_id: project.project_id,
+        status: project.status,
+        archived_at: project.archived_at,
+      },
+    );
 
     return {
       message: 'Dự án đã được tạm thời xóa',
@@ -229,6 +258,18 @@ export class ProjectsService {
       select: { task_id: true },
     });
     const taskIds = tasks.map((task) => task.task_id);
+    const memberIds = await this.getProjectMemberIds(id);
+
+    this.realtimeGateway.emitProjectEvent(id, 'project.deleted', {
+      project_id: id,
+    });
+    this.realtimeGateway.emitMemberProjectEvent(
+      memberIds,
+      'member.project.deleted',
+      {
+        project_id: id,
+      },
+    );
 
     await this.commentRepository.delete({ project_id: id });
     if (taskIds.length > 0) {
@@ -251,12 +292,27 @@ export class ProjectsService {
     userId: string,
   ) {
     const project = await this.findOwnedProject(id, userId);
+    const memberIds = await this.getProjectMemberIds(id);
 
     project.status = updateProjectStatusDto.status;
     project.archived_at =
       updateProjectStatusDto.status === StatusEnum.ARCHIVED ? new Date() : null;
 
     const savedProject = await this.projectRepository.save(project);
+    this.realtimeGateway.emitProjectEvent(id, 'project.status.updated', {
+      project: savedProject,
+      status: savedProject.status,
+      archived_at: savedProject.archived_at,
+    });
+    this.realtimeGateway.emitMemberProjectEvent(
+      memberIds,
+      'member.project.status.updated',
+      {
+        project_id: id,
+        status: savedProject.status,
+        archived_at: savedProject.archived_at,
+      },
+    );
 
     return this.formatProject(savedProject);
   }
@@ -299,6 +355,16 @@ export class ProjectsService {
     );
 
     await this.projectRepository.save(reorderedProjects);
+    reorderedProjects.forEach((project) => {
+      this.realtimeGateway.emitProjectEvent(
+        project.project_id,
+        'project.reordered',
+        {
+          status: reorderProjectsDto.status,
+          project_ids: reorderProjectsDto.project_ids,
+        },
+      );
+    });
 
     return {
       message: 'Đã cập nhật thứ tự project',
@@ -352,6 +418,19 @@ export class ProjectsService {
     );
 
     await this.projectMemberRepository.save(members);
+    this.realtimeGateway.emitProjectEvent(projectId, 'project.member.added', {
+      user_ids: userIds,
+      role: MemberRoleEnum.MEMBER,
+    });
+    this.realtimeGateway.emitMemberProjectEvent(
+      userIds,
+      'member.project.added',
+      {
+        project_id: projectId,
+        user_ids: userIds,
+        role: MemberRoleEnum.MEMBER,
+      },
+    );
 
     return {
       message: 'Đã thêm user vào dự án',
@@ -409,6 +488,14 @@ export class ProjectsService {
 
     member.role = dto.role;
     await this.projectMemberRepository.save(member);
+    this.realtimeGateway.emitProjectEvent(
+      projectId,
+      'project.member.role.updated',
+      {
+        user_id: memberId,
+        role: member.role,
+      },
+    );
 
     return { project_id: projectId, user_id: memberId, role: member.role };
   }
@@ -460,6 +547,17 @@ export class ProjectsService {
       project_id: projectId,
       user_id: In(userIds),
     });
+    this.realtimeGateway.emitProjectEvent(projectId, 'project.member.removed', {
+      user_ids: userIds,
+    });
+    this.realtimeGateway.emitMemberProjectEvent(
+      userIds,
+      'member.project.removed',
+      {
+        project_id: projectId,
+        user_ids: userIds,
+      },
+    );
 
     return {
       message: 'Đã xóa user khỏi dự án',
@@ -504,6 +602,9 @@ export class ProjectsService {
 
     await this.projectMemberRepository.delete({
       project_id: projectId,
+      user_id: userId,
+    });
+    this.realtimeGateway.emitProjectEvent(projectId, 'project.member.left', {
       user_id: userId,
     });
 
@@ -661,6 +762,15 @@ export class ProjectsService {
       .getRawOne<{ max: string | number }>();
 
     return Number(result?.max ?? 0) + 1;
+  }
+
+  private async getProjectMemberIds(projectId: string) {
+    const members = await this.projectMemberRepository.find({
+      where: { project_id: projectId },
+      select: { user_id: true },
+    });
+
+    return members.map((member) => member.user_id);
   }
 
   private async isSystemAdmin(userId: string) {

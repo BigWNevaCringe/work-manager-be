@@ -78,9 +78,13 @@ export class TasksService {
     });
 
     const savedTask = await this.taskRepository.save(task);
-    this.realtimeGateway.emitProjectEvent(task.project_id, 'task.updated', {
-      task: savedTask,
-    });
+    this.realtimeGateway.emitProjectEvent(
+      savedTask.project_id,
+      'task.created',
+      {
+        task: savedTask,
+      },
+    );
 
     return savedTask;
   }
@@ -256,6 +260,10 @@ export class TasksService {
     });
 
     await this.taskRepository.save(reorderedTasks);
+    this.realtimeGateway.emitProjectEvent(projectId, 'task.reordered', {
+      parent_task_id: reorderTasksDto.parent_task_id ?? null,
+      task_ids: reorderTasksDto.task_ids,
+    });
 
     return {
       message: 'Đã cập nhật thứ tự task',
@@ -270,6 +278,9 @@ export class TasksService {
 
     await this.ensureCanManageProject(task.project_id, userId);
     await this.deleteTaskWithSubtasks(id);
+    this.realtimeGateway.emitProjectEvent(task.project_id, 'task.deleted', {
+      task_id: id,
+    });
 
     return {
       message: 'Task đã được xóa',
@@ -473,10 +484,7 @@ export class TasksService {
       select: { user_id: true },
     });
 
-    return (
-      assignees.length === 1 &&
-      assignees[0]?.user_id === userId
-    );
+    return assignees.length === 1 && assignees[0]?.user_id === userId;
   }
 
   private validateStatusTransition(

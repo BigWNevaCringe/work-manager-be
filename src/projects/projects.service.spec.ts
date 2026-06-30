@@ -11,6 +11,7 @@ import { User } from '../users/entities/user.entity';
 import { Task } from '../tasks/entities/task.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
 import { Comment } from '../comments/entities/comment.entity';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 describe('ProjectsService', () => {
   let service: ProjectsService;
@@ -20,6 +21,7 @@ describe('ProjectsService', () => {
   let taskRepository: Record<string, jest.Mock>;
   let taskAssigneeRepository: Record<string, jest.Mock>;
   let commentRepository: Record<string, jest.Mock>;
+  let realtimeGateway: Record<string, jest.Mock>;
 
   const createRepositoryMock = () => ({
     create: jest.fn((value) => value),
@@ -52,6 +54,9 @@ describe('ProjectsService', () => {
     taskRepository = createRepositoryMock();
     taskAssigneeRepository = createRepositoryMock();
     commentRepository = createRepositoryMock();
+    realtimeGateway = {
+      emitProjectEvent: jest.fn(),
+    };
     taskRepository.find.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
@@ -80,6 +85,10 @@ describe('ProjectsService', () => {
         {
           provide: getRepositoryToken(Comment),
           useValue: commentRepository,
+        },
+        {
+          provide: RealtimeGateway,
+          useValue: realtimeGateway,
         },
       ],
     }).compile();

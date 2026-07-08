@@ -3,6 +3,7 @@ import { TasksService } from './tasks.service';
 import { TasksController } from './tasks.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Task } from './entities/task.entity';
+import { TaskChecklistItem } from './entities/task-checklist-item.entity';
 import { Project } from '../projects/entities/project.entity';
 import { ProjectMember } from '../project-members/project-member.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
@@ -14,6 +15,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
   imports: [
     TypeOrmModule.forFeature([
       Task,
+      TaskChecklistItem,
       Project,
       ProjectMember,
       TaskAssignee,

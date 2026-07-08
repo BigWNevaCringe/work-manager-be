@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -18,10 +19,9 @@ import {
   MemberRoleEnum,
   ProjectMember,
 } from '../project-members/project-member.entity';
-import { Task } from '../tasks/entities/task.entity';
+import { Task, TaskStatus } from '../tasks/entities/task.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
 import { User, UserRoleEnum } from '../users/entities/user.entity';
-import { Comment } from '../comments/entities/comment.entity';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 type FormattedTaskBase = {
@@ -36,13 +36,27 @@ type FormattedTaskBase = {
   position: number;
   start_date: Date;
   due_date: Date;
-  created_by: string;
+  created_by?: string | null;
   assignees: {
     user_id: string;
     email?: string;
     name?: string;
     avatar_url?: string;
     assigned_at: Date;
+  }[];
+  checklist_items: {
+    checklist_item_id: string;
+    task_id: string;
+    title: string;
+    description: string;
+    completed: boolean;
+    completed_at?: Date | null;
+    completed_by?: string | null;
+    position: number;
+    created_by?: string | null;
+    updated_by?: string | null;
+    created_at: Date;
+    updated_at: Date;
   }[];
 };
 
@@ -65,22 +79,25 @@ export class ProjectsService {
     private readonly taskRepository: Repository<Task>,
     @InjectRepository(TaskAssignee)
     private readonly taskAssigneeRepository: Repository<TaskAssignee>,
-    @InjectRepository(Comment)
-    private readonly commentRepository: Repository<Comment>,
     private readonly realtimeGateway: RealtimeGateway,
   ) {}
 
   async create(createProjectDto: CreateProjectDto, userId: string) {
     await this.checkExistingName(createProjectDto.project_name, userId);
+    this.validateProjectDates(
+      createProjectDto.start_date,
+      createProjectDto.end_date,
+    );
 
     const position = await this.getNextProjectPosition(
       userId,
-      StatusEnum.ACTIVE,
+      StatusEnum.NEW,
     );
 
     const project = this.projectRepository.create({
       ...createProjectDto,
       owner_id: userId,
+      status: StatusEnum.NEW,
       position,
     });
 
@@ -113,6 +130,7 @@ export class ProjectsService {
       .leftJoinAndSelect('project.members', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('project.tasks', 'task')
+      .leftJoinAndSelect('task.checklistItems', 'taskChecklistItem')
       .leftJoinAndSelect('task.assignees', 'taskAssignee')
       .leftJoinAndSelect('taskAssignee.user', 'taskAssigneeUser')
       .where('project.project_id = :id', { id });
@@ -138,9 +156,12 @@ export class ProjectsService {
       .leftJoinAndSelect('project.members', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('project.tasks', 'task')
+      .leftJoinAndSelect('task.checklistItems', 'taskChecklistItem')
       .leftJoinAndSelect('task.assignees', 'taskAssignee')
       .leftJoinAndSelect('taskAssignee.user', 'taskAssigneeUser')
-      .where('project.status = :status', { status: StatusEnum.ACTIVE })
+      .where('project.status IN (:...statuses)', {
+        statuses: Object.values(StatusEnum),
+      })
       .orderBy('project.position', 'ASC');
     if (!(await this.isSystemAdmin(userId))) {
       query
@@ -158,6 +179,7 @@ export class ProjectsService {
       .leftJoinAndSelect('project.members', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('project.tasks', 'task')
+      .leftJoinAndSelect('task.checklistItems', 'taskChecklistItem')
       .leftJoinAndSelect('task.assignees', 'taskAssignee')
       .leftJoinAndSelect('taskAssignee.user', 'taskAssigneeUser')
       .where('project.status = :status', { status: StatusEnum.COMPLETED })
@@ -178,9 +200,10 @@ export class ProjectsService {
       .leftJoinAndSelect('project.members', 'member')
       .leftJoinAndSelect('member.user', 'user')
       .leftJoinAndSelect('project.tasks', 'task')
+      .leftJoinAndSelect('task.checklistItems', 'taskChecklistItem')
       .leftJoinAndSelect('task.assignees', 'taskAssignee')
       .leftJoinAndSelect('taskAssignee.user', 'taskAssigneeUser')
-      .where('project.status = :status', { status: StatusEnum.ARCHIVED })
+      .where('project.status = :status', { status: StatusEnum.CANCELED })
       .orderBy('project.position', 'ASC');
     if (!(await this.isSystemAdmin(userId))) {
       query.andWhere('project.owner_id = :userId', { userId });
@@ -196,6 +219,10 @@ export class ProjectsService {
     if (updateProjectDto.project_name) {
       await this.checkExistingName(updateProjectDto.project_name, userId, id);
     }
+    this.validateProjectDates(
+      updateProjectDto.start_date,
+      updateProjectDto.end_date,
+    );
 
     Object.assign(project, updateProjectDto);
 
@@ -211,7 +238,7 @@ export class ProjectsService {
     const project = await this.findOwnedActiveProject(id, userId);
     const memberIds = await this.getProjectMemberIds(id);
 
-    project.status = StatusEnum.ARCHIVED;
+    project.status = StatusEnum.CANCELED;
     project.archived_at = new Date();
 
     await this.projectRepository.save(project);
@@ -240,7 +267,7 @@ export class ProjectsService {
     );
 
     return {
-      message: 'Dự án đã được tạm thời xóa',
+      message: 'Dự án đã được hủy',
       project_id: project.project_id,
       status: project.status,
       archived_at: project.archived_at,
@@ -249,8 +276,8 @@ export class ProjectsService {
 
   async permanentlyRemove(id: string, userId: string) {
     const project = await this.findOwnedProject(id, userId);
-    if (project.status !== StatusEnum.ARCHIVED) {
-      throw new ConflictException('Chỉ có thể xóa vĩnh viễn dự án đã archived');
+    if (project.status !== StatusEnum.CANCELED) {
+      throw new ConflictException('Chỉ có thể xóa vĩnh viễn dự án đã hủy');
     }
 
     const tasks = await this.taskRepository.find({
@@ -271,7 +298,6 @@ export class ProjectsService {
       },
     );
 
-    await this.commentRepository.delete({ project_id: id });
     if (taskIds.length > 0) {
       await this.taskAssigneeRepository.delete({ task_id: In(taskIds) });
       await this.taskRepository.delete({
@@ -296,7 +322,7 @@ export class ProjectsService {
 
     project.status = updateProjectStatusDto.status;
     project.archived_at =
-      updateProjectStatusDto.status === StatusEnum.ARCHIVED ? new Date() : null;
+      updateProjectStatusDto.status === StatusEnum.CANCELED ? new Date() : null;
 
     const savedProject = await this.projectRepository.save(project);
     this.realtimeGateway.emitProjectEvent(id, 'project.status.updated', {
@@ -568,7 +594,10 @@ export class ProjectsService {
 
   async leaveProject(projectId: string, userId: string) {
     const project = await this.projectRepository.findOne({
-      where: { project_id: projectId, status: StatusEnum.ACTIVE },
+      where: {
+        project_id: projectId,
+        status: In(this.getEditableStatuses()),
+      },
     });
 
     if (!project) {
@@ -621,7 +650,7 @@ export class ProjectsService {
     const project = await this.projectRepository.findOne({
       where: {
         project_id: projectId,
-        status: StatusEnum.ACTIVE,
+        status: In(this.getEditableStatuses()),
       },
     });
 
@@ -681,7 +710,7 @@ export class ProjectsService {
         description: task.description,
         status: task.status,
         priority: task.priority,
-        progress: task.progress,
+        progress: this.getTaskProgress(task),
         rejection_reason: task.rejection_reason,
         position: task.position,
         start_date: task.start_date,
@@ -695,6 +724,23 @@ export class ProjectsService {
             avatar_url: assignee.user?.avatar_url,
             assigned_at: assignee.assigned_at,
           })) ?? [],
+        checklist_items:
+          task.checklistItems
+            ?.map((item) => ({
+              checklist_item_id: item.checklist_item_id,
+              task_id: item.task_id,
+              title: item.title,
+              description: item.description,
+              completed: item.completed,
+              completed_at: item.completed_at,
+              completed_by: item.completed_by,
+              position: item.position,
+              created_by: item.created_by,
+              updated_by: item.updated_by,
+              created_at: item.created_at,
+              updated_at: item.updated_at,
+            }))
+            .sort((a, b) => a.position - b.position) ?? [],
         subtasks: [],
       });
     }
@@ -728,6 +774,33 @@ export class ProjectsService {
     return rootTasks;
   }
 
+  private getTaskProgress(task: Task) {
+    if (task.checklistItems && task.checklistItems.length > 0) {
+      const completed = task.checklistItems.filter((item) => item.completed).length;
+      const checklistProgress = Math.round(
+        (completed / task.checklistItems.length) * 100,
+      );
+      const statusProgress = this.getStatusProgress(task.status);
+
+      return Math.round((statusProgress + checklistProgress) / 2);
+    }
+
+    return this.getStatusProgress(task.status) ?? task.progress ?? 0;
+  }
+
+  private getStatusProgress(status: TaskStatus) {
+    const progressByStatus: Record<TaskStatus, number> = {
+      [TaskStatus.TODO]: 0,
+      [TaskStatus.PROGRESS]: 25,
+      [TaskStatus.REJECT]: 25,
+      [TaskStatus.SUBMITTED]: 50,
+      [TaskStatus.REVIEW]: 75,
+      [TaskStatus.DONE]: 100,
+    };
+
+    return progressByStatus[status] ?? 0;
+  }
+
   private async checkExistingName(
     project_name: string,
     userId: string,
@@ -738,7 +811,9 @@ export class ProjectsService {
       .innerJoin('project.members', 'member')
       .where('member.user_id = :userId', { userId })
       .andWhere('project.project_name = :project_name', { project_name })
-      .andWhere('project.status = :status', { status: StatusEnum.ACTIVE });
+      .andWhere('project.status IN (:...statuses)', {
+        statuses: this.getEditableStatuses(),
+      });
 
     if (excludeProjectId) {
       query.andWhere('project.project_id != :excludeProjectId', {
@@ -764,6 +839,14 @@ export class ProjectsService {
     return Number(result?.max ?? 0) + 1;
   }
 
+  private validateProjectDates(startDate: string, endDate: string) {
+    if (new Date(endDate).getTime() < new Date(startDate).getTime()) {
+      throw new BadRequestException(
+        'Ngày kết thúc không được trước ngày bắt đầu',
+      );
+    }
+  }
+
   private async getProjectMemberIds(projectId: string) {
     const members = await this.projectMemberRepository.find({
       where: { project_id: projectId },
@@ -778,5 +861,9 @@ export class ProjectsService {
       where: { user_id: userId },
     });
     return user?.role === UserRoleEnum.ADMIN;
+  }
+
+  private getEditableStatuses() {
+    return [StatusEnum.NEW, StatusEnum.IN_PROGRESS, StatusEnum.PAUSED];
   }
 }

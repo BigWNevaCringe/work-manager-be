@@ -10,9 +10,19 @@ import { ProjectMember } from '../../project-members/project-member.entity';
 import { Task } from '../../tasks/entities/task.entity';
 
 export enum StatusEnum {
-  ACTIVE = 'active', // Project đang làm
-  ARCHIVED = 'archived', // Project đang tạm thời xóa
+  NEW = 'new', // Project mới tạo
+  IN_PROGRESS = 'in_progress', // Project đang làm
+  PAUSED = 'paused', // Project tạm dừng
   COMPLETED = 'completed', // Project đã hoàn thành
+  CANCELED = 'canceled', // Project đã hủy
+}
+
+export enum ProjectPriorityEnum {
+  HIGHEST = 'highest',
+  HIGH = 'high',
+  MEDIUM = 'medium',
+  LOW = 'low',
+  LOWEST = 'lowest',
 }
 
 @Entity()
@@ -29,11 +39,24 @@ export class Project {
   @Column()
   owner_id!: string;
 
-  @Column({ type: 'enum', enum: StatusEnum, default: StatusEnum.ACTIVE })
+  @Column({ type: 'enum', enum: StatusEnum, default: StatusEnum.NEW })
   status!: StatusEnum;
+
+  @Column({
+    type: 'enum',
+    enum: ProjectPriorityEnum,
+    default: ProjectPriorityEnum.MEDIUM,
+  })
+  priority!: ProjectPriorityEnum;
 
   @Column({ type: 'float', default: 0 })
   position!: number;
+
+  @Column({ type: 'timestamptz', nullable: true, default: () => 'CURRENT_TIMESTAMP' })
+  start_date?: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true, default: () => 'CURRENT_TIMESTAMP' })
+  end_date?: Date | null;
 
   @Column({ type: 'timestamptz', nullable: true })
   archived_at?: Date | null;

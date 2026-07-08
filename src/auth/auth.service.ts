@@ -55,7 +55,10 @@ export class AuthService {
     name: string;
     avatar_url?: string | null;
   }) {
-    const user = await this.usersService.upsertGoogleUser(profile);
+    const user = await this.usersService.upsertGoogleUser({
+      ...profile,
+      avatar_url: this.normalizeGoogleAvatarUrl(profile.avatar_url),
+    });
     return this.issueTokens({ user_id: user.user_id, email: user.email });
   }
 
@@ -129,6 +132,23 @@ export class AuthService {
       name: profile.name || profile.email,
       avatar_url: profile.picture ?? null,
     });
+  }
+
+  private normalizeGoogleAvatarUrl(avatarUrl?: string | null) {
+    if (!avatarUrl) return null;
+
+    try {
+      const url = new URL(avatarUrl);
+      url.search = '';
+
+      if (url.hostname === 'lh3.googleusercontent.com') {
+        url.pathname = url.pathname.replace(/=s\d+(-c)?$/, '=s96-c');
+      }
+
+      return url.toString();
+    } catch {
+      return avatarUrl;
+    }
   }
 
   getAuthCookieOptions() {

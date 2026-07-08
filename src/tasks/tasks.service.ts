@@ -10,9 +10,12 @@ import { UpdateTaskDto } from './dto/update-task.dto';
 import { AssignTaskUserDto } from './dto/assign-task-user.dto';
 import { RemoveTaskAssigneesDto } from './dto/remove-task-assignees.dto';
 import { ReorderTasksDto } from './dto/reorder-tasks.dto';
+import { CreateTaskChecklistItemDto } from './dto/create-task-checklist-item.dto';
+import { UpdateTaskChecklistItemDto } from './dto/update-task-checklist-item.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Task, TaskStatus } from './entities/task.entity';
+import { TaskChecklistItem } from './entities/task-checklist-item.entity';
 import { Project, StatusEnum } from '../projects/entities/project.entity';
 import {
   MemberRoleEnum,
@@ -35,6 +38,8 @@ export class TasksService {
     private readonly projectMemberRepository: Repository<ProjectMember>,
     @InjectRepository(TaskAssignee)
     private readonly taskAssigneeRepository: Repository<TaskAssignee>,
+    @InjectRepository(TaskChecklistItem)
+    private readonly checklistItemRepository: Repository<TaskChecklistItem>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly realtimeGateway: RealtimeGateway,
@@ -46,13 +51,23 @@ export class TasksService {
     createTaskDto: CreateTaskDto,
     userId: string,
   ) {
-    await this.ensureCanManageProject(projectId, userId);
-
     if (createTaskDto.parent_task_id) {
       await this.ensureParentTaskInProject(
         createTaskDto.parent_task_id,
         projectId,
       );
+      const canManageProject = await this.canManageProject(projectId, userId);
+      const isParentAssignee = await this.isTaskAssignee(
+        createTaskDto.parent_task_id,
+        userId,
+      );
+      if (!canManageProject && !isParentAssignee) {
+        throw new ForbiddenException(
+          'Chỉ owner, manager hoặc assignee của task cha được tạo checklist',
+        );
+      }
+    } else {
+      await this.ensureCanManageProject(projectId, userId);
     }
 
     const position = await this.getNextPosition(
@@ -98,9 +113,13 @@ export class TasksService {
     );
     const canManage = this.isManager(membership.role);
     const isOwner = membership.role === MemberRoleEnum.OWNER;
+    const canEditChecklistTask =
+      Boolean(task.parent_task_id) &&
+      (await this.isTaskAssignee(task.parent_task_id as string, userId));
 
     if (
       !canManage &&
+      !canEditChecklistTask &&
       (updateTaskDto.title !== undefined ||
         updateTaskDto.description !== undefined ||
         updateTaskDto.priority !== undefined ||
@@ -108,11 +127,14 @@ export class TasksService {
         updateTaskDto.due_date !== undefined)
     ) {
       throw new ForbiddenException(
-        'Chỉ owner hoặc manager được sửa thông tin task',
+        'Chỉ owner, manager hoặc assignee của task cha được sửa checklist',
       );
     }
 
     const isAssignee = await this.isTaskAssignee(task.task_id, userId);
+    const isParentAssignee =
+      Boolean(task.parent_task_id) &&
+      (await this.isTaskAssignee(task.parent_task_id as string, userId));
     const isOwnerSelfAssignedTask =
       isOwner && (await this.isOnlyTaskAssignee(task.task_id, userId));
 
@@ -152,8 +174,8 @@ export class TasksService {
       this.validateStatusTransition(
         task.status,
         updateTaskDto.status,
-        canManage,
-        isAssignee,
+        canManage || isParentAssignee,
+        isAssignee || isParentAssignee,
         isOwnerSelfAssignedTask,
       );
       if (updateTaskDto.status === TaskStatus.TODO) task.progress = 0;
@@ -188,8 +210,7 @@ export class TasksService {
           : null,
       }),
     });
-    if (task.status === TaskStatus.TODO) task.progress = 0;
-    if (task.status === TaskStatus.DONE) task.progress = 100;
+    task.progress = await this.calculateTaskProgress(task.task_id, task.status);
 
     const savedTask = await this.taskRepository.save(task);
     this.realtimeGateway.emitProjectEvent(task.project_id, 'task.updated', {
@@ -276,7 +297,15 @@ export class TasksService {
   async remove(id: string, userId: string) {
     const task = await this.findTaskOrFail(id);
 
-    await this.ensureCanManageProject(task.project_id, userId);
+    const canManageProject = await this.canManageProject(task.project_id, userId);
+    const canDeleteChecklistTask =
+      Boolean(task.parent_task_id) &&
+      (await this.isTaskAssignee(task.parent_task_id as string, userId));
+    if (!canManageProject && !canDeleteChecklistTask) {
+      throw new ForbiddenException(
+        'Chỉ owner, manager hoặc assignee của task cha được xóa checklist',
+      );
+    }
     await this.deleteTaskWithSubtasks(id);
     this.realtimeGateway.emitProjectEvent(task.project_id, 'task.deleted', {
       task_id: id,
@@ -286,6 +315,79 @@ export class TasksService {
       message: 'Task đã được xóa',
       task_id: id,
     };
+  }
+
+  async createChecklistItem(
+    taskId: string,
+    dto: CreateTaskChecklistItemDto,
+    userId: string,
+  ) {
+    const task = await this.findTaskOrFail(taskId);
+    await this.ensureCanEditTaskChecklist(task, userId);
+
+    const position = await this.getNextChecklistItemPosition(taskId);
+    const item = this.checklistItemRepository.create({
+      task_id: taskId,
+      title: dto.title.trim(),
+      description: dto.description?.trim() ?? '',
+      created_by: userId,
+      updated_by: userId,
+      position,
+    });
+    const savedItem = await this.checklistItemRepository.save(item);
+    await this.syncTaskProgress(taskId, task.status);
+    this.realtimeGateway.emitProjectEvent(task.project_id, 'task.updated', {
+      task_id: taskId,
+    });
+
+    return savedItem;
+  }
+
+  async updateChecklistItem(
+    itemId: string,
+    dto: UpdateTaskChecklistItemDto,
+    userId: string,
+  ) {
+    const item = await this.findChecklistItemOrFail(itemId);
+    await this.ensureCanEditTaskChecklist(item.task, userId);
+
+    const nextCompleted =
+      dto.completed === undefined ? item.completed : dto.completed;
+
+    Object.assign(item, {
+      ...(dto.title !== undefined && { title: dto.title.trim() }),
+      ...(dto.description !== undefined && {
+        description: dto.description?.trim() ?? '',
+      }),
+      ...(dto.completed !== undefined && {
+        completed: dto.completed,
+        completed_at: dto.completed ? new Date() : null,
+        completed_by: dto.completed ? userId : null,
+      }),
+      updated_by: userId,
+    });
+    if (nextCompleted === item.completed && dto.completed === undefined) {
+      item.updated_by = userId;
+    }
+    const savedItem = await this.checklistItemRepository.save(item);
+    await this.syncTaskProgress(item.task_id, item.task.status);
+    this.realtimeGateway.emitProjectEvent(item.task.project_id, 'task.updated', {
+      task_id: item.task_id,
+    });
+
+    return savedItem;
+  }
+
+  async deleteChecklistItem(itemId: string, userId: string) {
+    const item = await this.findChecklistItemOrFail(itemId);
+    await this.ensureCanEditTaskChecklist(item.task, userId);
+    await this.checklistItemRepository.delete(itemId);
+    await this.syncTaskProgress(item.task_id, item.task.status);
+    this.realtimeGateway.emitProjectEvent(item.task.project_id, 'task.updated', {
+      task_id: item.task_id,
+    });
+
+    return { message: 'Checklist item deleted', checklist_item_id: itemId };
   }
 
   async assignUsers(
@@ -409,7 +511,7 @@ export class TasksService {
     const project = await this.projectRepository.findOne({
       where: {
         project_id: projectId,
-        status: StatusEnum.ACTIVE,
+        status: In(this.getEditableProjectStatuses()),
       },
     });
 
@@ -434,7 +536,10 @@ export class TasksService {
   private async getActiveProjectMembership(projectId: string, userId: string) {
     if (await this.isSystemAdmin(userId)) {
       const project = await this.projectRepository.findOne({
-        where: { project_id: projectId, status: StatusEnum.ACTIVE },
+        where: {
+          project_id: projectId,
+          status: In(this.getEditableProjectStatuses()),
+        },
       });
       if (!project) throw new NotFoundException('Không tìm thấy dự án');
 
@@ -459,6 +564,11 @@ export class TasksService {
     return membership;
   }
 
+  private async canManageProject(projectId: string, userId: string) {
+    const membership = await this.getActiveProjectMembership(projectId, userId);
+    return this.isManager(membership.role);
+  }
+
   private isManager(role: MemberRoleEnum) {
     return role === MemberRoleEnum.OWNER || role === MemberRoleEnum.MANAGER;
   }
@@ -470,12 +580,91 @@ export class TasksService {
     return user?.role === UserRoleEnum.ADMIN;
   }
 
+  private getEditableProjectStatuses() {
+    return [StatusEnum.NEW, StatusEnum.IN_PROGRESS, StatusEnum.PAUSED];
+  }
+
   private async isTaskAssignee(taskId: string, userId: string) {
     return Boolean(
       await this.taskAssigneeRepository.findOne({
         where: { task_id: taskId, user_id: userId },
       }),
     );
+  }
+
+  private async ensureCanEditTaskChecklist(task: Task, userId: string) {
+    const progress = await this.calculateTaskProgress(task.task_id, task.status);
+    if (task.status === TaskStatus.DONE && progress === 100) {
+      throw new ForbiddenException(
+        'Task đã hoàn thành 100%, hãy hạ trạng thái trước khi sửa checklist',
+      );
+    }
+
+    const canManageProject = await this.canManageProject(task.project_id, userId);
+    const isAssignee = await this.isTaskAssignee(task.task_id, userId);
+
+    if (!canManageProject && !isAssignee) {
+      throw new ForbiddenException(
+        'Chỉ owner, manager hoặc assignee của task được sửa checklist',
+      );
+    }
+  }
+
+  private async findChecklistItemOrFail(itemId: string) {
+    const item = await this.checklistItemRepository.findOne({
+      where: { checklist_item_id: itemId },
+      relations: { task: true },
+    });
+
+    if (!item) {
+      throw new NotFoundException('Không tìm thấy checklist item');
+    }
+
+    return item;
+  }
+
+  private async getNextChecklistItemPosition(taskId: string) {
+    const result = await this.checklistItemRepository
+      .createQueryBuilder('item')
+      .select('COALESCE(MAX(item.position), 0)', 'max')
+      .where('item.task_id = :taskId', { taskId })
+      .getRawOne<{ max: string | number }>();
+
+    return Number(result?.max ?? 0) + 1;
+  }
+
+  private getStatusProgress(status: TaskStatus) {
+    const progressByStatus: Record<TaskStatus, number> = {
+      [TaskStatus.TODO]: 0,
+      [TaskStatus.PROGRESS]: 25,
+      [TaskStatus.REJECT]: 25,
+      [TaskStatus.SUBMITTED]: 50,
+      [TaskStatus.REVIEW]: 75,
+      [TaskStatus.DONE]: 100,
+    };
+
+    return progressByStatus[status] ?? 0;
+  }
+
+  private async calculateTaskProgress(taskId: string, status: TaskStatus) {
+    const checklist = await this.checklistItemRepository.find({
+      where: { task_id: taskId },
+      select: { completed: true },
+    });
+
+    if (checklist.length === 0) return this.getStatusProgress(status);
+
+    const completed = checklist.filter((item) => item.completed).length;
+    const checklistProgress = Math.round((completed / checklist.length) * 100);
+    const statusProgress = this.getStatusProgress(status);
+
+    return Math.round((statusProgress + checklistProgress) / 2);
+  }
+
+  private async syncTaskProgress(taskId: string, status: TaskStatus) {
+    const progress = await this.calculateTaskProgress(taskId, status);
+    await this.taskRepository.update(taskId, { progress });
+    return progress;
   }
 
   private async isOnlyTaskAssignee(taskId: string, userId: string) {
@@ -532,7 +721,7 @@ export class TasksService {
       [TaskStatus.DONE]: [TaskStatus.REVIEW],
     };
 
-    if (canManage && managerTransitions[current]?.includes(next)) return;
+    if (canManage) return;
     if (
       isAssignee &&
       memberStatuses.includes(current) &&
@@ -568,7 +757,7 @@ export class TasksService {
     const project = await this.projectRepository.findOne({
       where: {
         project_id: projectId,
-        status: StatusEnum.ACTIVE,
+        status: In(this.getEditableProjectStatuses()),
       },
     });
 
@@ -714,7 +903,9 @@ export class TasksService {
       .innerJoin('project.members', 'member')
       .where('member.user_id = :userId', { userId })
       .andWhere('project.project_name = :project_name', { title })
-      .andWhere('project.status = :status', { status: StatusEnum.ACTIVE });
+      .andWhere('project.status IN (:...statuses)', {
+        statuses: this.getEditableProjectStatuses(),
+      });
 
     if (excludeProjectId) {
       query.andWhere('project.project_id != :excludeProjectId', {

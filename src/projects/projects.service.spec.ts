@@ -2,7 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Project, StatusEnum } from './entities/project.entity';
+import {
+  Project,
+  ProjectPriorityEnum,
+  StatusEnum,
+} from './entities/project.entity';
 import {
   MemberRoleEnum,
   ProjectMember,
@@ -10,7 +14,6 @@ import {
 import { User } from '../users/entities/user.entity';
 import { Task } from '../tasks/entities/task.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
-import { Comment } from '../comments/entities/comment.entity';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 describe('ProjectsService', () => {
@@ -20,7 +23,6 @@ describe('ProjectsService', () => {
   let userRepository: Record<string, jest.Mock>;
   let taskRepository: Record<string, jest.Mock>;
   let taskAssigneeRepository: Record<string, jest.Mock>;
-  let commentRepository: Record<string, jest.Mock>;
   let realtimeGateway: Record<string, jest.Mock>;
 
   const createRepositoryMock = () => ({
@@ -40,7 +42,14 @@ describe('ProjectsService', () => {
   const activeProject = {
     project_id: projectId,
     owner_id: ownerId,
-    status: 'active',
+    status: StatusEnum.IN_PROGRESS,
+  };
+  const updateProjectDto = {
+    project_name: '',
+    project_description: 'Updated description',
+    priority: ProjectPriorityEnum.MEDIUM,
+    start_date: '2026-07-04',
+    end_date: '2026-08-04',
   };
 
   const mockOwnedProject = () => {
@@ -53,10 +62,11 @@ describe('ProjectsService', () => {
     userRepository = createRepositoryMock();
     taskRepository = createRepositoryMock();
     taskAssigneeRepository = createRepositoryMock();
-    commentRepository = createRepositoryMock();
     realtimeGateway = {
       emitProjectEvent: jest.fn(),
+      emitMemberProjectEvent: jest.fn(),
     };
+    projectMemberRepository.find.mockResolvedValue([]);
     taskRepository.find.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
@@ -83,10 +93,6 @@ describe('ProjectsService', () => {
           useValue: taskAssigneeRepository,
         },
         {
-          provide: getRepositoryToken(Comment),
-          useValue: commentRepository,
-        },
-        {
           provide: RealtimeGateway,
           useValue: realtimeGateway,
         },
@@ -106,14 +112,14 @@ describe('ProjectsService', () => {
 
       await service.update(
         projectId,
-        { project_name: '', project_description: 'Updated description' },
+        updateProjectDto,
         ownerId,
       );
 
       expect(projectRepository.findOne).toHaveBeenCalledWith({
         where: {
           project_id: projectId,
-          status: StatusEnum.ACTIVE,
+          status: expect.any(Object),
         },
       });
       expect(projectRepository.save).toHaveBeenCalledWith(
@@ -129,7 +135,7 @@ describe('ProjectsService', () => {
       await expect(
         service.update(
           projectId,
-          { project_name: '', project_description: 'Updated description' },
+          updateProjectDto,
           ownerId,
         ),
       ).rejects.toBeInstanceOf(NotFoundException);
@@ -146,7 +152,7 @@ describe('ProjectsService', () => {
 
       await service.updateStatus(
         projectId,
-        { status: StatusEnum.ACTIVE },
+        { status: StatusEnum.IN_PROGRESS },
         ownerId,
       );
 
@@ -154,7 +160,7 @@ describe('ProjectsService', () => {
         where: { project_id: projectId },
       });
       expect(projectRepository.save).toHaveBeenCalledWith(
-        expect.objectContaining({ status: StatusEnum.ACTIVE }),
+        expect.objectContaining({ status: StatusEnum.IN_PROGRESS }),
       );
     });
   });
@@ -163,7 +169,7 @@ describe('ProjectsService', () => {
     it('deletes an archived project and its related records', async () => {
       projectRepository.findOne.mockResolvedValue({
         ...activeProject,
-        status: StatusEnum.ARCHIVED,
+        status: StatusEnum.CANCELED,
       });
       taskRepository.find.mockResolvedValue([
         { task_id: '66666666-6666-6666-6666-666666666666' },
@@ -171,9 +177,6 @@ describe('ProjectsService', () => {
 
       await service.permanentlyRemove(projectId, ownerId);
 
-      expect(commentRepository.delete).toHaveBeenCalledWith({
-        project_id: projectId,
-      });
       expect(taskAssigneeRepository.delete).toHaveBeenCalled();
       expect(taskRepository.delete).toHaveBeenCalledTimes(2);
       expect(projectMemberRepository.delete).toHaveBeenCalledWith({
@@ -201,13 +204,13 @@ describe('ProjectsService', () => {
         { project_id: firstUserId, user_id: ownerId },
       ]);
       projectRepository.find.mockResolvedValue([
-        { project_id: projectId, status: StatusEnum.ACTIVE, position: 1 },
-        { project_id: firstUserId, status: StatusEnum.ACTIVE, position: 2 },
+        { project_id: projectId, status: StatusEnum.IN_PROGRESS, position: 1 },
+        { project_id: firstUserId, status: StatusEnum.IN_PROGRESS, position: 2 },
       ]);
 
       await service.reorder(
         {
-          status: StatusEnum.ACTIVE,
+          status: StatusEnum.IN_PROGRESS,
           project_ids: [firstUserId, projectId],
         },
         ownerId,
@@ -225,13 +228,13 @@ describe('ProjectsService', () => {
         { project_id: firstUserId, user_id: ownerId },
       ]);
       projectRepository.find.mockResolvedValue([
-        { project_id: projectId, status: StatusEnum.ACTIVE, position: 1 },
-        { project_id: firstUserId, status: StatusEnum.ACTIVE, position: 2 },
+        { project_id: projectId, status: StatusEnum.IN_PROGRESS, position: 1 },
+        { project_id: firstUserId, status: StatusEnum.IN_PROGRESS, position: 2 },
       ]);
 
       await expect(
         service.reorder(
-          { status: StatusEnum.ACTIVE, project_ids: [projectId] },
+          { status: StatusEnum.IN_PROGRESS, project_ids: [projectId] },
           ownerId,
         ),
       ).rejects.toBeInstanceOf(ConflictException);

@@ -8,11 +8,14 @@ import {
 import { TasksService } from './tasks.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Task, TaskPriorityEnum, TaskStatus } from './entities/task.entity';
-import { Project } from '../projects/entities/project.entity';
+import { TaskChecklistItem } from './entities/task-checklist-item.entity';
+import { Project, StatusEnum } from '../projects/entities/project.entity';
 import { ProjectMember } from '../project-members/project-member.entity';
 import { TaskAssignee } from '../task-assignees/task-assignee.entity';
 import { User } from '../users/entities/user.entity';
 import { MemberRoleEnum } from '../project-members/project-member.entity';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
 
 describe('TasksService', () => {
   let service: TasksService;
@@ -20,6 +23,7 @@ describe('TasksService', () => {
   let projectRepository: Record<string, jest.Mock>;
   let projectMemberRepository: Record<string, jest.Mock>;
   let taskAssigneeRepository: Record<string, jest.Mock>;
+  let checklistItemRepository: Record<string, jest.Mock>;
   let userRepository: Record<string, jest.Mock>;
 
   const createRepositoryMock = () => ({
@@ -29,6 +33,7 @@ describe('TasksService', () => {
     find: jest.fn(),
     findOne: jest.fn(),
     save: jest.fn((value) => value),
+    update: jest.fn(),
   });
 
   const taskId = '11111111-1111-1111-1111-111111111111';
@@ -46,7 +51,7 @@ describe('TasksService', () => {
     projectRepository.findOne.mockResolvedValue({
       project_id: projectId,
       owner_id: ownerId,
-      status: 'active',
+      status: StatusEnum.IN_PROGRESS,
     });
     projectMemberRepository.findOne.mockResolvedValue({
       user_id: ownerId,
@@ -59,7 +64,10 @@ describe('TasksService', () => {
     projectRepository = createRepositoryMock();
     projectMemberRepository = createRepositoryMock();
     taskAssigneeRepository = createRepositoryMock();
+    checklistItemRepository = createRepositoryMock();
     userRepository = createRepositoryMock();
+    taskAssigneeRepository.find.mockResolvedValue([]);
+    checklistItemRepository.find.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -81,8 +89,25 @@ describe('TasksService', () => {
           useValue: taskAssigneeRepository,
         },
         {
+          provide: getRepositoryToken(TaskChecklistItem),
+          useValue: checklistItemRepository,
+        },
+        {
           provide: getRepositoryToken(User),
           useValue: userRepository,
+        },
+        {
+          provide: RealtimeGateway,
+          useValue: {
+            emitProjectEvent: jest.fn(),
+            emitMemberProjectEvent: jest.fn(),
+          },
+        },
+        {
+          provide: NotificationsService,
+          useValue: {
+            createMany: jest.fn(),
+          },
         },
       ],
     }).compile();
@@ -95,7 +120,7 @@ describe('TasksService', () => {
   });
 
   describe('update', () => {
-    it('updates task status, priority and progress', async () => {
+    it('updates task priority and derives progress from status when there is no checklist', async () => {
       mockTaskAndOwner();
       taskAssigneeRepository.findOne.mockResolvedValue({ user_id: ownerId });
 
@@ -112,7 +137,7 @@ describe('TasksService', () => {
         expect.objectContaining({
           status: TaskStatus.PROGRESS,
           priority: TaskPriorityEnum.HIGH,
-          progress: 100,
+          progress: 25,
         }),
       );
     });
@@ -126,7 +151,7 @@ describe('TasksService', () => {
       });
       projectRepository.findOne.mockResolvedValue({
         project_id: projectId,
-        status: 'active',
+        status: StatusEnum.IN_PROGRESS,
       });
       projectMemberRepository.findOne.mockResolvedValue({
         user_id: firstUserId,
@@ -156,7 +181,7 @@ describe('TasksService', () => {
       });
       projectRepository.findOne.mockResolvedValue({
         project_id: projectId,
-        status: 'active',
+        status: StatusEnum.IN_PROGRESS,
       });
       projectMemberRepository.findOne.mockResolvedValue({
         user_id: firstUserId,
@@ -176,7 +201,7 @@ describe('TasksService', () => {
       });
       projectRepository.findOne.mockResolvedValue({
         project_id: projectId,
-        status: 'active',
+        status: StatusEnum.IN_PROGRESS,
       });
       projectMemberRepository.findOne.mockResolvedValue({
         user_id: firstUserId,
@@ -196,7 +221,7 @@ describe('TasksService', () => {
     it('updates sibling positions in the requested order', async () => {
       projectRepository.findOne.mockResolvedValue({
         project_id: projectId,
-        status: 'active',
+        status: StatusEnum.IN_PROGRESS,
       });
       projectMemberRepository.findOne.mockResolvedValue({
         user_id: ownerId,
@@ -222,7 +247,7 @@ describe('TasksService', () => {
     it('rejects an incomplete sibling list', async () => {
       projectRepository.findOne.mockResolvedValue({
         project_id: projectId,
-        status: 'active',
+        status: StatusEnum.IN_PROGRESS,
       });
       projectMemberRepository.findOne.mockResolvedValue({
         user_id: ownerId,

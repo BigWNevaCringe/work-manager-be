@@ -93,20 +93,21 @@ export class AuthController {
   async loginGoogleCallback(
     @Query('code') code: string | undefined,
     @Query('error') error: string | undefined,
-    @Res({ passthrough: true }) res: Response,
+    @Res() res: Response,
   ) {
     const appUrl = this.configService.get<string>('APP_URL') ?? 'http://localhost:3000';
 
     if (error || !code) {
-      return res.redirect(`${appUrl}/login?error=google`);
+      res.redirect(`${appUrl}/login?error=google`);
+      return;
     }
 
     try {
       const tokens = await this.authService.loginWithGoogleCode(code);
       this.setAuthCookies(res, tokens);
-      return res.redirect(`${appUrl}/`);
+      res.redirect(`${appUrl}/`);
     } catch {
-      return res.redirect(`${appUrl}/login?error=google`);
+      res.redirect(`${appUrl}/login?error=google`);
     }
   }
 

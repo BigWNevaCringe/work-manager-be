@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { Project } from '../../projects/entities/project.entity';
 import { TaskAssignee } from '../../task-assignees/task-assignee.entity';
+import { TaskChecklistItem } from './task-checklist-item.entity';
 
 export enum TaskPriorityEnum {
   HIGHEST = 'highest',
@@ -33,10 +34,10 @@ export class Task {
   @PrimaryGeneratedColumn('uuid')
   task_id!: string;
 
-  @Column()
+  @Column({ type: 'uuid' })
   project_id!: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'uuid', nullable: true })
   parent_task_id?: string;
 
   @Column()
@@ -70,8 +71,8 @@ export class Task {
   @Column({ type: 'timestamptz', nullable: true })
   due_date!: Date;
 
-  @Column()
-  created_by!: string;
+  @Column({ type: 'varchar', nullable: true })
+  created_by?: string | null;
 
   @ManyToOne(() => Project, (project) => project.tasks)
   @JoinColumn({ name: 'project_id' })
@@ -86,6 +87,9 @@ export class Task {
 
   @OneToMany(() => TaskAssignee, (ta) => ta.task)
   assignees!: TaskAssignee[];
+
+  @OneToMany(() => TaskChecklistItem, (item) => item.task)
+  checklistItems!: TaskChecklistItem[];
 
   @CreateDateColumn({ type: 'timestamptz', select: false })
   created_at!: Date;

@@ -14,6 +14,8 @@ import { UpdateTaskDto } from './dto/update-task.dto';
 import { AssignTaskUserDto } from './dto/assign-task-user.dto';
 import { RemoveTaskAssigneesDto } from './dto/remove-task-assignees.dto';
 import { ReorderTasksDto } from './dto/reorder-tasks.dto';
+import { CreateTaskChecklistItemDto } from './dto/create-task-checklist-item.dto';
+import { UpdateTaskChecklistItemDto } from './dto/update-task-checklist-item.dto';
 import { ApiOperation } from '@nestjs/swagger';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -47,6 +49,35 @@ export class TasksController {
     @CurrentUser('sub') userId: string,
   ) {
     return this.tasksService.assignUsers(id, assignTaskUserDto, userId);
+  }
+
+  @ApiOperation({ summary: 'Thêm checklist item vào task' })
+  @Post(':id/checklist')
+  createChecklistItem(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateTaskChecklistItemDto,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.tasksService.createChecklistItem(id, dto, userId);
+  }
+
+  @ApiOperation({ summary: 'Cập nhật checklist item' })
+  @Patch('checklist/:id')
+  updateChecklistItem(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateTaskChecklistItemDto,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.tasksService.updateChecklistItem(id, dto, userId);
+  }
+
+  @ApiOperation({ summary: 'Xóa checklist item' })
+  @Delete('checklist/:id')
+  deleteChecklistItem(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.tasksService.deleteChecklistItem(id, userId);
   }
 
   @ApiOperation({

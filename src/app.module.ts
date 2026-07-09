@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { DataSource, DataSourceOptions } from 'typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { UsersModule } from './users/users.module';
 import { ProjectsModule } from './projects/projects.module';
@@ -43,8 +44,19 @@ import { Notification } from './notifications/entities/notification.entity';
           Notification,
         ],
         migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
-        synchronize: configService.getOrThrow<boolean>('DB_SYNC'),
+        synchronize:
+          configService.getOrThrow<string>('NODE_ENV') === 'production'
+            ? false
+            : configService.getOrThrow<boolean>('DB_SYNC'),
       }),
+      dataSourceFactory: async (options) => {
+        if (!options) {
+          throw new Error('TypeORM options are required');
+        }
+
+        await ensureProjectStatusEnumCompatibility(options);
+        return new DataSource(options).initialize();
+      },
       inject: [ConfigService],
     }),
     UsersModule,
@@ -58,3 +70,51 @@ import { Notification } from './notifications/entities/notification.entity';
   providers: [],
 })
 export class AppModule {}
+
+async function ensureProjectStatusEnumCompatibility(
+  options: DataSourceOptions,
+) {
+  const dataSource = new DataSource({
+    ...options,
+    synchronize: false,
+    migrationsRun: false,
+  });
+
+  await dataSource.initialize();
+
+  try {
+    await dataSource.query(`
+      ALTER TYPE "public"."project_status_enum" ADD VALUE IF NOT EXISTS 'new'
+    `);
+    await dataSource.query(`
+      ALTER TYPE "public"."project_status_enum" ADD VALUE IF NOT EXISTS 'in_progress'
+    `);
+    await dataSource.query(`
+      ALTER TYPE "public"."project_status_enum" ADD VALUE IF NOT EXISTS 'paused'
+    `);
+    await dataSource.query(`
+      ALTER TYPE "public"."project_status_enum" ADD VALUE IF NOT EXISTS 'canceled'
+    `);
+    await dataSource.query(`
+      DO $$
+      BEGIN
+        IF to_regclass('public.project') IS NOT NULL THEN
+          UPDATE "project"
+          SET "status" = 'in_progress'
+          WHERE "status"::text = 'active';
+
+          UPDATE "project"
+          SET "status" = 'canceled'
+          WHERE "status"::text = 'archived';
+        END IF;
+      END $$;
+    `);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes('project_status_enum')) {
+      throw error;
+    }
+  } finally {
+    await dataSource.destroy();
+  }
+}

@@ -6,7 +6,7 @@ WORKDIR /app
 # Install the complete dependency tree required to build NestJS.
 FROM base AS dependencies
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile
+RUN bun install
 
 FROM base AS build
 COPY --from=dependencies /app/node_modules ./node_modules
@@ -19,7 +19,7 @@ RUN bun run build
 FROM base AS production-dependencies
 ENV NODE_ENV=production
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
+RUN bun install --production
 
 FROM base AS runner
 ENV NODE_ENV=production

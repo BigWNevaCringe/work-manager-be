@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { ApiOperation } from '@nestjs/swagger';
@@ -18,6 +18,15 @@ export class UsersController {
   @Get()
   findAll(@CurrentUser('sub') userId: string) {
     return this.usersService.findAll(userId);
+  }
+
+  @ApiOperation({ summary: 'Tìm user để thêm vào dự án' })
+  @Get('candidates')
+  findCandidates(
+    @Query('search') search: string,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.usersService.findCandidates(search, userId);
   }
 
   // @Get(':id')

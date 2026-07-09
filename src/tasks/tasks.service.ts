@@ -70,7 +70,7 @@ export class TasksService {
       await this.ensureCanManageProject(projectId, userId);
     }
 
-    const position = await this.getNextPosition(
+    await this.shiftSiblingPositionsDown(
       projectId,
       createTaskDto.parent_task_id,
     );
@@ -83,7 +83,8 @@ export class TasksService {
       parent_task_id: createTaskDto.parent_task_id,
       project_id: projectId,
       created_by: userId,
-      position,
+      position: 1,
+      priority: createTaskDto.priority,
       start_date: createTaskDto.start_date
         ? new Date(createTaskDto.start_date)
         : undefined,
@@ -852,20 +853,23 @@ export class TasksService {
     }
   }
 
-  private async getNextPosition(projectId: string, parentTaskId?: string) {
+  private async shiftSiblingPositionsDown(
+    projectId: string,
+    parentTaskId?: string,
+  ) {
     const query = this.taskRepository
       .createQueryBuilder('task')
-      .select('COALESCE(MAX(task.position), 0)', 'max')
-      .where('task.project_id = :projectId', { projectId });
+      .update(Task)
+      .set({ position: () => 'position + 1' })
+      .where('project_id = :projectId', { projectId });
 
     if (parentTaskId) {
-      query.andWhere('task.parent_task_id = :parentTaskId', { parentTaskId });
+      query.andWhere('parent_task_id = :parentTaskId', { parentTaskId });
     } else {
-      query.andWhere('task.parent_task_id IS NULL');
+      query.andWhere('parent_task_id IS NULL');
     }
 
-    const result = await query.getRawOne<{ max: string | number }>();
-    return Number(result?.max ?? 0) + 1;
+    await query.execute();
   }
 
   private async findTaskOrFail(taskId: string) {

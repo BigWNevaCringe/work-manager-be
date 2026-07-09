@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsDateString, IsEnum, IsNotEmpty, IsString } from 'class-validator';
+import { IsDateString, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { ProjectPriorityEnum } from '../entities/project.entity';
 
 export class UpdateProjectDto {
@@ -18,8 +18,9 @@ export class UpdateProjectDto {
   start_date!: string;
 
   @ApiProperty({ example: '2026-08-04T00:00:00.000Z' })
+  @IsOptional()
   @IsDateString({}, { message: 'Ngày kết thúc không hợp lệ' })
-  end_date!: string;
+  end_date?: string | null;
 
   @ApiProperty({ enum: ProjectPriorityEnum, example: ProjectPriorityEnum.MEDIUM })
   @IsEnum(ProjectPriorityEnum, { message: 'Độ ưu tiên dự án không hợp lệ' })

@@ -1,5 +1,14 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsDateString, IsEnum, IsNotEmpty, IsString } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ArrayUnique,
+  IsArray,
+  IsDateString,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
 import { ProjectPriorityEnum } from '../entities/project.entity';
 
 export class CreateProjectDto {
@@ -17,11 +26,22 @@ export class CreateProjectDto {
   @IsDateString({}, { message: 'Ngày bắt đầu không hợp lệ' })
   start_date!: string;
 
-  @ApiProperty({ example: '2026-08-04T00:00:00.000Z' })
+  @ApiPropertyOptional({ example: '2026-08-04T00:00:00.000Z' })
+  @IsOptional()
   @IsDateString({}, { message: 'Ngày kết thúc không hợp lệ' })
-  end_date!: string;
+  end_date?: string | null;
 
   @ApiProperty({ enum: ProjectPriorityEnum, example: ProjectPriorityEnum.MEDIUM })
   @IsEnum(ProjectPriorityEnum, { message: 'Độ ưu tiên dự án không hợp lệ' })
   priority!: ProjectPriorityEnum;
+
+  @ApiPropertyOptional({
+    example: ['6132352f-013f-4fe6-bb6f-7b785497fbef'],
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('all', { each: true })
+  member_user_ids?: string[];
 }

@@ -49,6 +49,23 @@ export class UsersService {
     return await this.userRepository.find();
   }
 
+  async findCandidates(search: string, currentUserId: string) {
+    const query = this.userRepository
+      .createQueryBuilder('user')
+      .select(['user.user_id', 'user.name', 'user.email', 'user.avatar_url'])
+      .where('user.user_id != :currentUserId', { currentUserId })
+      .orderBy('user.name', 'ASC')
+      .take(20);
+
+    if (search?.trim()) {
+      query.andWhere('(user.name ILIKE :search OR user.email ILIKE :search)', {
+        search: `%${search.trim()}%`,
+      });
+    }
+
+    return query.getMany();
+  }
+
   async findOne(user_id: string) {
     const user = await this.userRepository.findOne({ where: { user_id } });
     if (!user) throw new NotFoundException('Không tìm thấy user');

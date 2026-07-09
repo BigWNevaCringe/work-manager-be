@@ -1,11 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsDateString,
+  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
 } from 'class-validator';
+import { TaskPriorityEnum } from '../entities/task.entity';
 
 export class CreateTaskDto {
   @ApiProperty({ example: 'Design dashboard layout' })
@@ -34,4 +36,12 @@ export class CreateTaskDto {
   @IsOptional()
   @IsDateString()
   due_date?: string | null;
+
+  @ApiPropertyOptional({
+    enum: TaskPriorityEnum,
+    example: TaskPriorityEnum.MEDIUM,
+  })
+  @IsOptional()
+  @IsEnum(TaskPriorityEnum)
+  priority?: TaskPriorityEnum;
 }

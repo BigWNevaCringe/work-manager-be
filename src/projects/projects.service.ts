@@ -88,14 +88,23 @@ export class ProjectsService {
       createProjectDto.start_date,
       createProjectDto.end_date,
     );
+    const initialMemberIds = await this.validateInitialProjectMembers(
+      createProjectDto.member_user_ids ?? [],
+      userId,
+    );
 
     const position = await this.getNextProjectPosition(
       userId,
       StatusEnum.NEW,
     );
 
+    const { member_user_ids: _memberUserIds, ...projectPayload } =
+      createProjectDto;
+    void _memberUserIds;
+
     const project = this.projectRepository.create({
-      ...createProjectDto,
+      ...projectPayload,
+      end_date: createProjectDto.end_date ?? null,
       owner_id: userId,
       status: StatusEnum.NEW,
       position,
@@ -103,13 +112,20 @@ export class ProjectsService {
 
     const savedProject = await this.projectRepository.save(project);
 
-    const ownerMember = this.projectMemberRepository.create({
-      project_id: savedProject.project_id,
-      user_id: userId,
-      role: MemberRoleEnum.OWNER,
-    });
+    const members = this.projectMemberRepository.create([
+      {
+        project_id: savedProject.project_id,
+        user_id: userId,
+        role: MemberRoleEnum.OWNER,
+      },
+      ...initialMemberIds.map((memberUserId) => ({
+        project_id: savedProject.project_id,
+        user_id: memberUserId,
+        role: MemberRoleEnum.MEMBER,
+      })),
+    ]);
 
-    await this.projectMemberRepository.save(ownerMember);
+    await this.projectMemberRepository.save(members);
 
     const createdProject = await this.projectRepository.findOne({
       where: { project_id: savedProject.project_id },
@@ -839,12 +855,39 @@ export class ProjectsService {
     return Number(result?.max ?? 0) + 1;
   }
 
-  private validateProjectDates(startDate: string, endDate: string) {
+  private validateProjectDates(startDate: string, endDate?: string | null) {
+    if (!endDate) return;
     if (new Date(endDate).getTime() < new Date(startDate).getTime()) {
       throw new BadRequestException(
         'Ngày kết thúc không được trước ngày bắt đầu',
       );
     }
+  }
+
+  private async validateInitialProjectMembers(
+    userIds: string[],
+    ownerId: string,
+  ) {
+    const uniqueUserIds = [...new Set(userIds)].filter((id) => id !== ownerId);
+    if (uniqueUserIds.length === 0) return [];
+
+    const users = await this.userRepository.find({
+      where: { user_id: In(uniqueUserIds) },
+      select: { user_id: true },
+    });
+    const existingUserIds = new Set(users.map((user) => user.user_id));
+    const missingUserIds = uniqueUserIds.filter(
+      (id) => !existingUserIds.has(id),
+    );
+
+    if (missingUserIds.length > 0) {
+      throw new NotFoundException({
+        message: 'Không tìm thấy user',
+        user_ids: missingUserIds,
+      });
+    }
+
+    return uniqueUserIds;
   }
 
   private async getProjectMemberIds(projectId: string) {

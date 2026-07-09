@@ -15,16 +15,10 @@ COPY nest-cli.json tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN bun run build
 
-# Create a clean production-only dependency tree.
-FROM base AS production-dependencies
-ENV NODE_ENV=production
-COPY package.json bun.lock ./
-RUN bun install --production
-
 FROM base AS runner
 ENV NODE_ENV=production
 
-COPY --from=production-dependencies --chown=bun:bun /app/node_modules ./node_modules
+COPY --from=dependencies --chown=bun:bun /app/node_modules ./node_modules
 COPY --from=build --chown=bun:bun /app/dist ./dist
 COPY --chown=bun:bun package.json ./package.json
 

@@ -27,5 +27,5 @@ export default new DataSource({
     Notification,
   ],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
-  synchronize: true,
+  synchronize: false,
 });

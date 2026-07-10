@@ -653,13 +653,14 @@ export class TasksService {
       select: { completed: true },
     });
 
-    if (checklist.length === 0) return this.getStatusProgress(status);
+    const statusProgress = this.getStatusProgress(status);
+
+    if (checklist.length === 0) return statusProgress;
 
     const completed = checklist.filter((item) => item.completed).length;
     const checklistProgress = Math.round((completed / checklist.length) * 100);
-    const statusProgress = this.getStatusProgress(status);
 
-    return Math.round((statusProgress + checklistProgress) / 2);
+    return Math.max(statusProgress, checklistProgress);
   }
 
   private async syncTaskProgress(taskId: string, status: TaskStatus) {

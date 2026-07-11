@@ -44,7 +44,8 @@ type MemberProjectEventName =
   | 'member.project.added'
   | 'member.project.status.updated'
   | 'member.project.removed'
-  | 'member.project.deleted';
+  | 'member.project.deleted'
+  | 'notification.created';
 
 @WebSocketGateway({
   namespace: 'work-manager',

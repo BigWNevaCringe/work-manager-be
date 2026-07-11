@@ -224,7 +224,7 @@ export class TasksService {
       const assignees = await this.taskAssigneeRepository.find({
         where: { task_id: savedTask.task_id },
       });
-      await this.notificationsService.createMany(
+      const notifications = await this.notificationsService.createMany(
         assignees.map((assignee) => ({
           userId: assignee.user_id,
           projectId: savedTask.project_id,
@@ -237,10 +237,21 @@ export class TasksService {
           metadata: { rejection_reason: savedTask.rejection_reason },
         })),
       );
+      this.emitNotificationCreated(
+        (notifications ?? []).map((item) => item.user_id),
+      );
       this.realtimeGateway.emitProjectEvent(task.project_id, 'task.rejected', {
         task: savedTask,
         rejection_reason: savedTask.rejection_reason,
       });
+    }
+    if (
+      updateTaskDto.status &&
+      [TaskStatus.SUBMITTED, TaskStatus.REVIEW, TaskStatus.DONE].includes(
+        updateTaskDto.status,
+      )
+    ) {
+      await this.notifyProjectManagersAboutTaskUpdate(savedTask, userId);
     }
 
     return savedTask;
@@ -431,7 +442,7 @@ export class TasksService {
     );
 
     await this.taskAssigneeRepository.save(assignees);
-    await this.notificationsService.createMany(
+    const notifications = await this.notificationsService.createMany(
       userIds.map((assignedUserId) => ({
         userId: assignedUserId,
         projectId: task.project_id,
@@ -440,6 +451,9 @@ export class TasksService {
         title: 'Bạn được giao task',
         message: task.title,
       })),
+    );
+    this.emitNotificationCreated(
+      (notifications ?? []).map((item) => item.user_id),
     );
     this.realtimeGateway.emitProjectEvent(task.project_id, 'task.assigned', {
       task_id: taskId,
@@ -849,6 +863,52 @@ export class TasksService {
         user_ids: nonMemberIds,
       });
     }
+  }
+
+  private async notifyProjectManagersAboutTaskUpdate(task: Task, actorUserId: string) {
+    const managers = await this.projectMemberRepository.find({
+      where: {
+        project_id: task.project_id,
+        role: In([MemberRoleEnum.OWNER, MemberRoleEnum.MANAGER]),
+      },
+    });
+    const userIds = (managers ?? [])
+      .map((member) => member.user_id)
+      .filter((userId) => userId !== actorUserId);
+
+    const notifications = await this.notificationsService.createMany(
+      userIds.map((userId) => ({
+        userId,
+        projectId: task.project_id,
+        taskId: task.task_id,
+        type: NotificationType.TASK_UPDATED,
+        title: 'Task được cập nhật trạng thái',
+        message: `${task.title}: ${this.getTaskStatusLabel(task.status)}`,
+        metadata: { status: task.status },
+      })),
+    );
+    this.emitNotificationCreated(
+      (notifications ?? []).map((item) => item.user_id),
+    );
+  }
+
+  private emitNotificationCreated(userIds: string[]) {
+    const uniqueUserIds = [...new Set(userIds)];
+    if (uniqueUserIds.length === 0) return;
+    this.realtimeGateway.emitMemberProjectEvent(uniqueUserIds, 'notification.created', {});
+  }
+
+  private getTaskStatusLabel(status: TaskStatus) {
+    const labels: Record<TaskStatus, string> = {
+      [TaskStatus.TODO]: 'To do',
+      [TaskStatus.PROGRESS]: 'In progress',
+      [TaskStatus.SUBMITTED]: 'Submitted',
+      [TaskStatus.REVIEW]: 'Review',
+      [TaskStatus.REJECT]: 'Rejected',
+      [TaskStatus.DONE]: 'Done',
+    };
+
+    return labels[status];
   }
 
   private async ensureParentTaskInProject(

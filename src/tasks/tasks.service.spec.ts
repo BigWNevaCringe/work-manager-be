@@ -443,4 +443,76 @@ describe('TasksService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
+
+  describe('checklist permissions', () => {
+    const checklistItemId = '66666666-6666-6666-6666-666666666666';
+
+    beforeEach(() => {
+      userRepository.findOne.mockResolvedValue(null);
+      projectRepository.findOne.mockResolvedValue({
+        project_id: projectId,
+        status: StatusEnum.IN_PROGRESS,
+      });
+      projectMemberRepository.findOne.mockResolvedValue({
+        project_id: projectId,
+        user_id: firstUserId,
+        role: MemberRoleEnum.MEMBER,
+      });
+      checklistItemRepository.findOne.mockResolvedValue({
+        checklist_item_id: checklistItemId,
+        task_id: taskId,
+        title: 'Old item',
+        description: '',
+        completed: false,
+        task: {
+          task_id: taskId,
+          project_id: projectId,
+          status: TaskStatus.PROGRESS,
+        },
+      });
+    });
+
+    it('allows a task assignee to edit checklist item content', async () => {
+      taskAssigneeRepository.findOne.mockResolvedValue({
+        task_id: taskId,
+        user_id: firstUserId,
+      });
+
+      await service.updateChecklistItem(
+        checklistItemId,
+        { title: 'Updated item' },
+        firstUserId,
+      );
+
+      expect(checklistItemRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Updated item',
+          updated_by: firstUserId,
+        }),
+      );
+    });
+
+    it('allows a task assignee to delete a checklist item', async () => {
+      taskAssigneeRepository.findOne.mockResolvedValue({
+        task_id: taskId,
+        user_id: firstUserId,
+      });
+
+      await service.deleteChecklistItem(checklistItemId, firstUserId);
+
+      expect(checklistItemRepository.delete).toHaveBeenCalledWith(checklistItemId);
+    });
+
+    it('rejects checklist edits from a project member who is not assigned to the task', async () => {
+      taskAssigneeRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.updateChecklistItem(
+          checklistItemId,
+          { title: 'Updated item' },
+          firstUserId,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
 });

@@ -8,6 +8,7 @@ import {
 export enum NotificationType {
   TASK_ASSIGNED = 'task_assigned',
   TASK_REJECTED = 'task_rejected',
+  TASK_UPDATED = 'task_updated',
 }
 
 @Entity('notifications')

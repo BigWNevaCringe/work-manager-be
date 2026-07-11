@@ -179,6 +179,9 @@ export class TasksService {
         isAssignee || isParentAssignee,
         isOwnerSelfAssignedTask,
       );
+      if (updateTaskDto.status === TaskStatus.DONE) {
+        await this.ensureChecklistComplete(task.task_id);
+      }
       if (updateTaskDto.status === TaskStatus.TODO) task.progress = 0;
       if (updateTaskDto.status === TaskStatus.DONE) task.progress = 100;
       if (updateTaskDto.status === TaskStatus.REJECT) {
@@ -655,12 +658,26 @@ export class TasksService {
 
     const statusProgress = this.getStatusProgress(status);
 
+    if (status === TaskStatus.DONE) return 100;
     if (checklist.length === 0) return statusProgress;
 
     const completed = checklist.filter((item) => item.completed).length;
     const checklistProgress = Math.round((completed / checklist.length) * 100);
 
-    return Math.max(statusProgress, checklistProgress);
+    return Math.min(checklistProgress, 99);
+  }
+
+  private async ensureChecklistComplete(taskId: string) {
+    const checklist = await this.checklistItemRepository.find({
+      where: { task_id: taskId },
+      select: { completed: true },
+    });
+
+    if (checklist.some((item) => !item.completed)) {
+      throw new BadRequestException(
+        'Vui lòng hoàn thành toàn bộ checklist trước khi chuyển task sang done',
+      );
+    }
   }
 
   private async syncTaskProgress(taskId: string, status: TaskStatus) {

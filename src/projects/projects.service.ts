@@ -793,13 +793,15 @@ export class ProjectsService {
   private getTaskProgress(task: Task) {
     const statusProgress = this.getStatusProgress(task.status);
 
+    if (task.status === TaskStatus.DONE) return 100;
+
     if (task.checklistItems && task.checklistItems.length > 0) {
       const completed = task.checklistItems.filter((item) => item.completed).length;
       const checklistProgress = Math.round(
         (completed / task.checklistItems.length) * 100,
       );
 
-      return Math.max(statusProgress, checklistProgress);
+      return Math.min(checklistProgress, 99);
     }
 
     return statusProgress ?? task.progress ?? 0;

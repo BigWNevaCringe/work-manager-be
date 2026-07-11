@@ -215,6 +215,57 @@ describe('TasksService', () => {
         expect.objectContaining({ status: TaskStatus.REVIEW }),
       );
     });
+
+    it('rejects done status while checklist has incomplete items', async () => {
+      taskRepository.findOne.mockResolvedValue({
+        task_id: taskId,
+        project_id: projectId,
+        status: TaskStatus.REVIEW,
+      });
+      projectRepository.findOne.mockResolvedValue({
+        project_id: projectId,
+        status: StatusEnum.IN_PROGRESS,
+      });
+      projectMemberRepository.findOne.mockResolvedValue({
+        user_id: firstUserId,
+        role: MemberRoleEnum.MANAGER,
+      });
+      taskAssigneeRepository.findOne.mockResolvedValue(null);
+      checklistItemRepository.find.mockResolvedValue([{ completed: false }]);
+
+      await expect(
+        service.update(taskId, { status: TaskStatus.DONE }, firstUserId),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(taskRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('allows done status when checklist is complete', async () => {
+      taskRepository.findOne.mockResolvedValue({
+        task_id: taskId,
+        project_id: projectId,
+        status: TaskStatus.REVIEW,
+      });
+      projectRepository.findOne.mockResolvedValue({
+        project_id: projectId,
+        status: StatusEnum.IN_PROGRESS,
+      });
+      projectMemberRepository.findOne.mockResolvedValue({
+        user_id: firstUserId,
+        role: MemberRoleEnum.MANAGER,
+      });
+      taskAssigneeRepository.findOne.mockResolvedValue(null);
+      checklistItemRepository.find.mockResolvedValue([{ completed: true }]);
+
+      await service.update(taskId, { status: TaskStatus.DONE }, firstUserId);
+
+      expect(taskRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: TaskStatus.DONE,
+          progress: 100,
+        }),
+      );
+    });
   });
 
   describe('reorder', () => {
